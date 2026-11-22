@@ -132,6 +132,14 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 			m.GuardDirty(cx, func() { m.Route.Set(RouteSettings) })
 		}
 	})
+	cx.OnKeyWith("mod+shift+d", core.KeyOptions{When: core.KeyAlways}, func() {
+		if m.LockState.Get() == state.StatusUnlocked {
+			m.GuardDirty(cx, func() {
+				m.ResetIdleTimer()
+				m.Route.Set(RouteDedup)
+			})
+		}
+	})
 	cx.OnKeyWith("down", core.KeyOptions{When: core.KeyNotEditing}, func() {
 		if m.LockState.Get() == state.StatusUnlocked && m.Route.Get() == RouteVault && !m.EditMode.Get() {
 			m.MoveListSelection(cx, 1)
