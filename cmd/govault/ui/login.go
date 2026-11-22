@@ -185,11 +185,7 @@ func passwordField(cx *core.Scope, m *AppModel, in base.Input, height core.Point
 				field := in
 				field.Masked = !show.Get()
 				field.OnBlur = settleSecureInput
-				pad := core.Edges{Left: 10, Right: inset}
-				if cx.Env().RTL() {
-					pad = core.Edges{Left: inset, Right: 10}
-				}
-				field.Style = core.Style{Padding: pad}.Merge(field.Style)
+				field.Style = core.Style{Padding: core.Edges{Left: 10, Right: inset}}.Merge(field.Style)
 				return sizedInput(field, height)
 			}),
 			core.View{

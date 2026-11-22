@@ -669,20 +669,43 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 	}, func(a, b *i18n.Catalog) bool {
 		return a != nil && b != nil && a.Code() == b.Code()
 	})
+	autoForced := ""
 	app.Effect(func() {
 		pref := m.Prefs.Get().Language
 		if pref != "" {
+			autoForced = ""
 			resolved := i18n.NormalizeLocale(pref)
 			m.Locale.Set(resolved)
-			if core.Untracked(app, app.Env().Locale) != resolved {
+			if m.forcedLocale != resolved || core.Untracked(app, app.Env().Locale) != resolved {
 				m.applyScopeLocale(resolved)
 			}
 			return
 		}
-		if m.forcedLocale != "" {
+		// pref == "" (Auto / System Default): if an explicit pref had forced
+		// the scope locale, clear it before reading app.Env().Locale() so the
+		// host environment locale is exposed rather than our own override.
+		if m.forcedLocale != "" && m.forcedLocale != autoForced {
 			m.applyScopeLocale("")
 		}
 		envLoc := app.Env().Locale()
+		if autoForced != "" && envLoc == autoForced {
+			resolved := autoForced
+			if m.Hooks.DetectSystemLocale != nil {
+				resolved = i18n.NormalizeLocale(m.Hooks.DetectSystemLocale())
+			}
+			m.Locale.Set(resolved)
+			if resolved != autoForced {
+				if resolved == i18n.DefaultLocale {
+					autoForced = ""
+					m.applyScopeLocale("")
+				} else {
+					autoForced = resolved
+					m.applyScopeLocale(resolved)
+				}
+			}
+			return
+		}
+		autoForced = ""
 		resolved := i18n.DefaultLocale
 		switch {
 		case envLoc != "":
@@ -692,6 +715,7 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		}
 		m.Locale.Set(resolved)
 		if envLoc == "" && resolved != i18n.DefaultLocale {
+			autoForced = resolved
 			m.applyScopeLocale(resolved)
 		}
 	})
