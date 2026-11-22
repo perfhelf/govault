@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +16,7 @@ import (
 	"github.com/txchen/govault/internal/vaultcore/api"
 	"github.com/txchen/govault/internal/vaultcore/i18n"
 	"github.com/txchen/govault/internal/vaultcore/state"
+	"github.com/txchen/govault/internal/vaultcore/urlcheck"
 )
 
 func selectOption(t *testing.T, app *nsgotest.App, selectID string, index int) {
@@ -422,6 +425,22 @@ func TestI18nNewPRSurfacesLocalizedAndRTL(t *testing.T) {
 	}
 
 	app, m, _ := startSecurityApp(t, svc, PlatformHooks{})
+	app.Post(func() {
+		m.urlCheckOpts = func() urlcheck.Options {
+			return urlcheck.Options{
+				Concurrency: 2,
+				Timeout:     time.Second,
+				LookupHost: func(context.Context, string) ([]string, error) {
+					return []string{"93.184.216.34"}, nil
+				},
+				HTTPClient: &http.Client{
+					Transport: uiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						return uiResp(r, http.StatusOK), nil
+					}),
+				},
+			}
+		}
+	})
 
 	app.Press("id:sidebar-settings")
 	app.WaitFor("id:settings-language", 2*time.Second)
