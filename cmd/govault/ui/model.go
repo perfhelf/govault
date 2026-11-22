@@ -19,6 +19,7 @@ import (
 	"github.com/nsgo-dev/nsgo/ui"
 	"github.com/txchen/govault/internal/vaultcore/api"
 	"github.com/txchen/govault/internal/vaultcore/crypto"
+	"github.com/txchen/govault/internal/vaultcore/dedup"
 	"github.com/txchen/govault/internal/vaultcore/gen"
 	"github.com/txchen/govault/internal/vaultcore/health"
 	"github.com/txchen/govault/internal/vaultcore/sshagent"
@@ -50,6 +51,7 @@ const (
 	RouteSettings
 	RouteHealth
 	RouteImport
+	RouteDedup
 )
 
 type LoginAuthMode string
@@ -444,20 +446,31 @@ type AppModel struct {
 	LockAutoFired   bool
 	LockPasswordRef core.Ref
 
-	SidebarFilter *core.Signal[state.SearchFilter]
-	SearchQuery   *core.Signal[string]
-	SearchRef     core.Ref
-	Folders       *core.Signal[[]state.Folder]
-	Organizations *core.Signal[[]state.Organization]
-	Collections   *core.Signal[[]state.Collection]
-	AllCounts     *core.Signal[VaultCounts]
-	Health        *core.Signal[health.Report]
-	FilteredItems *core.Collection[string, state.CipherSummary]
-	SelectedID    *core.Signal[string]
-	IsSelected    func(id string) bool
-	ActiveCipher  *core.Signal[*state.Cipher]
-	RevealPW      *core.Signal[bool]
-	RevealCard    *core.Signal[bool]
+	SidebarFilter     *core.Signal[state.SearchFilter]
+	SearchQuery       *core.Signal[string]
+	SearchRef         core.Ref
+	Folders           *core.Signal[[]state.Folder]
+	Organizations     *core.Signal[[]state.Organization]
+	Collections       *core.Signal[[]state.Collection]
+	AllCounts         *core.Signal[VaultCounts]
+	Health            *core.Signal[health.Report]
+	DedupReport       *core.Signal[dedup.Report]
+	DedupFilter       *core.Signal[DedupFilterTab]
+	DedupSelected     *core.Signal[map[string]bool]
+	DedupKeepIDs      *core.Signal[map[string]string]
+	DedupTitles       *core.Signal[map[string]string]
+	DedupSimplifyURLs *core.Signal[bool]
+	DedupBusy         *core.Signal[bool]
+	DedupProgress     *core.Signal[dedup.Progress]
+	DedupResult       *core.Signal[*dedup.ExecuteReport]
+	dedupMu           sync.Mutex
+	dedupCancel       context.CancelFunc
+	FilteredItems     *core.Collection[string, state.CipherSummary]
+	SelectedID        *core.Signal[string]
+	IsSelected        func(id string) bool
+	ActiveCipher      *core.Signal[*state.Cipher]
+	RevealPW          *core.Signal[bool]
+	RevealCard        *core.Signal[bool]
 	// TOTPRevealedID is the item whose protected TOTP code was revealed.
 	TOTPRevealedID *core.Signal[string]
 
@@ -656,6 +669,15 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		Collections:               core.NewSignalFunc(app, []state.Collection(nil), nil),
 		AllCounts:                 core.NewSignalFunc(app, VaultCounts{ByFolder: map[string]int{}}, nil),
 		Health:                    core.NewSignalFunc(app, health.Report{}, nil),
+		DedupReport:               core.NewSignalFunc(app, dedup.Report{}, nil),
+		DedupFilter:               core.NewSignal(app, DedupAll),
+		DedupSelected:             core.NewSignalFunc(app, map[string]bool(nil), nil),
+		DedupKeepIDs:              core.NewSignalFunc(app, map[string]string(nil), nil),
+		DedupTitles:               core.NewSignalFunc(app, map[string]string(nil), nil),
+		DedupSimplifyURLs:         core.NewSignal(app, false),
+		DedupBusy:                 core.NewSignal(app, false),
+		DedupProgress:             core.NewSignal(app, dedup.Progress{}),
+		DedupResult:               core.NewSignalFunc[*dedup.ExecuteReport](app, nil, nil),
 		FilteredItems:             core.NewCollectionFunc(app, func(c state.CipherSummary) string { return c.ID }, cipherSummaryEqual, nil),
 		SelectedID:                core.NewSignal(app, ""),
 		ActiveCipher:              core.NewSignal[*state.Cipher](app, nil),
@@ -749,6 +771,7 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 	})
 
 	app.Cleanup(func() {
+		m.cancelDedupMerge()
 		m.totpCtrl.Stop()
 		m.idleTimer.Stop()
 		if m.Hooks.SSHAgent != nil {
@@ -1522,7 +1545,8 @@ func (m *AppModel) clearUnlockedUI() {
 	m.clearBatchState()
 	m.clearBackupState()
 	m.clearProfileExportState()
-	if m.Route.Get() == RouteImport {
+	m.clearDedupState()
+	if m.Route.Get() == RouteImport || m.Route.Get() == RouteDedup {
 		m.Route.Set(RouteVault)
 	}
 	m.TOTPRevealedID.Set("")
@@ -1605,6 +1629,7 @@ func (m *AppModel) Logout(cx *core.Scope) {
 		m.RevokePending()
 		m.clearAuthInputs()
 		m.clearBatchState()
+		m.cancelDedupMerge()
 		if m.Hooks.SSHAgent != nil {
 			m.Hooks.SSHAgent.Clear()
 		}
@@ -1700,6 +1725,7 @@ func (m *AppModel) RefreshVaultData() {
 	m.Collections.Set(m.Core.Collections())
 	m.recomputeCounts()
 	m.recomputeHealth()
+	m.recomputeDedup()
 	m.RefreshFilteredList()
 	m.pruneBatchSelection()
 	m.vaultRev.Set(m.vaultRev.GetUntracked() + 1)

@@ -79,6 +79,8 @@ func UnlockedShellView(cx *core.Scope, m *AppModel) core.Node {
 							return HealthView(cx, m)
 						case RouteImport:
 							return ImportView(cx, m)
+						case RouteDedup:
+							return DedupView(cx, m)
 						default:
 							return vaultSplitPanes(cx, m, shellW)
 						}
@@ -99,6 +101,8 @@ func (m *AppModel) filterTitle() string {
 		return "Vault Health"
 	case RouteImport:
 		return "Import"
+	case RouteDedup:
+		return "Duplicates"
 	}
 	if m.SearchIsGlobal() {
 		return "All Items"
@@ -379,6 +383,13 @@ func sidebarView(cx *core.Scope, m *AppModel) core.Node {
 						badge:  true,
 						active: func() bool { return m.Route.Get() == RouteHealth },
 						press:  route(RouteHealth),
+					}),
+					sidebarRow(sidebarEntry{
+						testID: "sidebar-dedup", label: "Duplicates", glyph: lucide.CopyCheck, tint: 0x5856d6,
+						count:  func() int { return m.DedupReport.Get().RedundantItems() },
+						badge:  true,
+						active: func() bool { return m.Route.Get() == RouteDedup },
+						press:  route(RouteDedup),
 					}),
 					sidebarRow(sidebarEntry{
 						testID: "sidebar-archive", label: "Archive", glyph: lucide.Archive, tint: 0x8e8e93,

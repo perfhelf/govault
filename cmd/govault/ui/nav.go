@@ -21,12 +21,21 @@ const (
 	HealthUnreadable  HealthCategory = "unreadable"
 )
 
+type DedupFilterTab string
+
+const (
+	DedupAll      DedupFilterTab = ""
+	DedupExact    DedupFilterTab = "exact"
+	DedupSameSite DedupFilterTab = "same_site"
+)
+
 // NavState is one place the user visited, as Back and Forward restore it.
 type NavState struct {
 	Route        MainRoute
 	Filter       state.SearchFilter
 	SelectedID   string
 	HealthFilter HealthCategory
+	DedupFilter  DedupFilterTab
 }
 
 const maxNavHistory = 100
@@ -47,7 +56,7 @@ func filterEqual(a, b state.SearchFilter) bool {
 }
 
 func (a NavState) equal(b NavState) bool {
-	return a.Route == b.Route && a.SelectedID == b.SelectedID && a.HealthFilter == b.HealthFilter && filterEqual(a.Filter, b.Filter)
+	return a.Route == b.Route && a.SelectedID == b.SelectedID && a.HealthFilter == b.HealthFilter && a.DedupFilter == b.DedupFilter && filterEqual(a.Filter, b.Filter)
 }
 
 func cloneFilter(f state.SearchFilter) state.SearchFilter {
@@ -64,6 +73,7 @@ func (m *AppModel) navState() NavState {
 		Filter:       cloneFilter(m.SidebarFilter.Get()),
 		SelectedID:   m.SelectedID.Get(),
 		HealthFilter: m.HealthFilter.Get(),
+		DedupFilter:  m.DedupFilter.Get(),
 	}
 }
 
@@ -150,6 +160,7 @@ func (m *AppModel) navigate(cx *core.Scope, dir int) {
 			m.Route.Set(target.Route)
 			m.SidebarFilter.Set(cloneFilter(target.Filter))
 			m.HealthFilter.Set(target.HealthFilter)
+			m.DedupFilter.Set(target.DedupFilter)
 			m.SearchQuery.Set("")
 			m.SearchAll.Set(false)
 			m.RefreshFilteredList()
