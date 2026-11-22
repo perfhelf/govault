@@ -302,6 +302,19 @@ type LoginRequest struct {
 	SameAccount *Account
 }
 
+type LoginAPIKeyRequest struct {
+	ServerURL      string
+	ClientID       string
+	ClientSecret   string
+	Email          string
+	MasterPassword []byte
+
+	// SameAccount, when set, is the account of the local vault this
+	// sign-in renews (Sign In Again). A login to any other account or
+	// server is refused with ErrDifferentAccount before anything is saved.
+	SameAccount *Account
+}
+
 // Account is who a vault belongs to: the account ID and the server and
 // email it was signed in with.
 type Account struct {
@@ -329,6 +342,7 @@ type Collection struct {
 type VaultService interface {
 	Status() LockStatus
 	Login(ctx context.Context, req LoginRequest) error
+	LoginWithAPIKey(ctx context.Context, req LoginAPIKeyRequest) error
 	SendEmailTwoFactorCode(ctx context.Context, req LoginRequest) error
 	UnlockWithPassword(ctx context.Context, masterPassword []byte) error
 	UnlockWithUserKey(ctx context.Context, userKey *crypto.SymmetricKey) error

@@ -373,3 +373,140 @@ func TestUpdatePayloadAlwaysCarriesArchivedDate(t *testing.T) {
 		t.Fatalf("payload = %s, want archivedDate present", raw)
 	}
 }
+
+func TestClient_LoginAPIKey(t *testing.T) {
+	var mode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/identity/connect/token" || r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/x-www-form-urlencoded") {
+			t.Errorf("Content-Type = %q, want form-urlencoded", ct)
+		}
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected Authorization header: %q", r.Header.Get("Authorization"))
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if r.FormValue("grant_type") != "client_credentials" ||
+			r.FormValue("scope") != "api" ||
+			r.FormValue("client_id") != "user.abc-123" ||
+			r.FormValue("client_secret") != "secret-xyz" ||
+			r.FormValue("deviceIdentifier") != "dev-1" ||
+			r.FormValue("deviceName") != "macos" ||
+			r.FormValue("deviceType") != "7" {
+			t.Errorf("unexpected form values: %v", r.Form)
+		}
+		if r.FormValue("username") != "" || r.FormValue("password") != "" {
+			t.Errorf("unexpected username/password fields in API key login: %v", r.Form)
+		}
+
+		switch mode {
+		case "argon2id":
+			_, _ = w.Write([]byte(`{"access_token":"tok-api","expires_in":3600,"token_type":"Bearer","Key":"2.iv|ct|mac","PrivateKey":"2.pk","Kdf":1,"KdfIterations":3,"KdfMemory":64,"KdfParallelism":4}`))
+		case "pbkdf2-lowercase":
+			_, _ = w.Write([]byte(`{"access_token":"tok-api","expires_in":3600,"token_type":"Bearer","Key":"2.iv|ct|mac","kdf":0,"kdfIterations":600000}`))
+		case "no-kdf":
+			_, _ = w.Write([]byte(`{"access_token":"tok-api","expires_in":3600,"token_type":"Bearer","Key":"2.iv|ct|mac"}`))
+		case "incomplete-argon2":
+			_, _ = w.Write([]byte(`{"access_token":"tok-api","expires_in":3600,"token_type":"Bearer","Key":"2.iv|ct|mac","Kdf":1,"KdfIterations":3}`))
+		case "unauthorized":
+			w.WriteHeader(http.StatusUnauthorized)
+		case "bad-request":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_client","error_description":"Invalid client credentials"}`))
+		}
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(ClientConfig{
+		ServerURL:  srv.URL,
+		DeviceID:   "dev-1",
+		DeviceName: "macos",
+		DeviceType: 7,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	ctx := context.Background()
+
+	if _, err := c.LoginAPIKey(ctx, " ", "secret"); err == nil {
+		t.Fatal("expected error for blank client_id")
+	}
+	if _, err := c.LoginAPIKey(ctx, "user.abc-123", ""); err == nil {
+		t.Fatal("expected error for blank client_secret")
+	}
+
+	mode = "argon2id"
+	tok, err := c.LoginAPIKey(ctx, " user.abc-123 ", " secret-xyz ")
+	if err != nil {
+		t.Fatalf("LoginAPIKey(argon2id): %v", err)
+	}
+	if tok.AccessToken != "tok-api" || tok.RefreshToken != "" || tok.Key != "2.iv|ct|mac" || tok.PrivateKey != "2.pk" {
+		t.Fatalf("unexpected token response: %+v", tok)
+	}
+	kdf, ok := tok.KDFConfig()
+	if !ok || kdf.Type != crypto.KDFArgon2id || kdf.Iterations != 3 || kdf.MemoryMB != 64 || kdf.Parallelism != 4 {
+		t.Fatalf("KDFConfig(argon2id) = (%+v, %v)", kdf, ok)
+	}
+
+	mode = "pbkdf2-lowercase"
+	tok, err = c.LoginAPIKey(ctx, "user.abc-123", "secret-xyz")
+	if err != nil {
+		t.Fatalf("LoginAPIKey(pbkdf2): %v", err)
+	}
+	kdf, ok = tok.KDFConfig()
+	if !ok || kdf.Type != crypto.KDFPBKDF2 || kdf.Iterations != 600000 {
+		t.Fatalf("KDFConfig(pbkdf2) = (%+v, %v)", kdf, ok)
+	}
+
+	for _, m := range []string{"no-kdf", "incomplete-argon2"} {
+		mode = m
+		tok, err = c.LoginAPIKey(ctx, "user.abc-123", "secret-xyz")
+		if err != nil {
+			t.Fatalf("LoginAPIKey(%s): %v", m, err)
+		}
+		if _, ok := tok.KDFConfig(); ok {
+			t.Fatalf("KDFConfig(%s) = true, want false", m)
+		}
+	}
+
+	mode = "unauthorized"
+	if _, err := c.LoginAPIKey(ctx, "user.abc-123", "secret-xyz"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("401 = %v, want ErrUnauthorized", err)
+	}
+
+	mode = "bad-request"
+	var apiErr *APIError
+	if _, err := c.LoginAPIKey(ctx, "user.abc-123", "secret-xyz"); !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+		t.Fatalf("400 = %v, want *APIError(400)", err)
+	}
+}
+
+func TestClient_LoginAPIKeyRefusesCrossOriginRedirect(t *testing.T) {
+	var leaked bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked = true
+	}))
+	defer other.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", other.URL+r.URL.Path)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	c, err := NewClient(ClientConfig{ServerURL: srv.URL, HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.LoginAPIKey(context.Background(), "user.1", "secret-1"); !errors.Is(err, ErrRedirectRefused) {
+		t.Fatalf("redirect = %v, want ErrRedirectRefused", err)
+	}
+	if leaked {
+		t.Fatal("client_credentials request reached another origin")
+	}
+}

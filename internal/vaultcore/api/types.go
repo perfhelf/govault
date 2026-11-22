@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/txchen/govault/internal/vaultcore/crypto"
 )
 
 type CipherType int
@@ -36,6 +38,30 @@ type TokenResponse struct {
 	KDFParallel  *int   `json:"KdfParallelism"`
 
 	TwoFactorToken string `json:"TwoFactorToken"`
+}
+
+// KDFConfig extracts the optional KDF parameters included in a token
+// response. It returns false when the response omits KDF fields or omits
+// required Argon2id parameters, so callers can fall back to Prelogin.
+func (t *TokenResponse) KDFConfig() (crypto.KDFConfig, bool) {
+	if t == nil || t.KDF < 0 || t.KDFIters <= 0 {
+		return crypto.KDFConfig{}, false
+	}
+	cfg := crypto.KDFConfig{
+		Type:       crypto.KDFType(t.KDF),
+		Iterations: uint32(t.KDFIters),
+	}
+	if cfg.Type == crypto.KDFArgon2id {
+		if t.KDFMemory == nil || *t.KDFMemory <= 0 || t.KDFParallel == nil || *t.KDFParallel <= 0 {
+			return crypto.KDFConfig{}, false
+		}
+		cfg.MemoryMB = uint32(*t.KDFMemory)
+		cfg.Parallelism = uint32(*t.KDFParallel)
+	}
+	if crypto.ValidateKDF(cfg) != nil {
+		return crypto.KDFConfig{}, false
+	}
+	return cfg, true
 }
 
 type SyncResponse struct {

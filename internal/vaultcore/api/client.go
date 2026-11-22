@@ -128,15 +128,27 @@ func (c *Client) LoginPassword(ctx context.Context, email, masterPasswordHash st
 		"Auth-Email": base64.RawURLEncoding.EncodeToString([]byte(normEmail)),
 	}
 
-	raw, err := c.do(ctx, http.MethodPost, "/identity/connect/token", "application/x-www-form-urlencoded", "", headers, []byte(form.Encode()))
-	if err != nil {
-		return nil, err
+	return c.postTokenForm(ctx, form, headers)
+}
+
+// LoginAPIKey signs in using a Personal API Key (grant_type=client_credentials)
+// and returns the token response, including any optional KDF parameters.
+func (c *Client) LoginAPIKey(ctx context.Context, clientID, clientSecret string) (*TokenResponse, error) {
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	if clientID == "" || clientSecret == "" {
+		return nil, errors.New("api: client_id and client_secret are required")
 	}
-	var resp TokenResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, err
+	form := url.Values{
+		"grant_type":       {"client_credentials"},
+		"scope":            {"api"},
+		"client_id":        {clientID},
+		"client_secret":    {clientSecret},
+		"deviceIdentifier": {c.deviceID},
+		"deviceName":       {c.deviceName},
+		"deviceType":       {strconv.Itoa(c.deviceType)},
 	}
-	return &resp, nil
+	return c.postTokenForm(ctx, form, nil)
 }
 
 func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*TokenResponse, error) {
@@ -145,8 +157,14 @@ func (c *Client) RefreshToken(ctx context.Context, refreshToken string) (*TokenR
 		"refresh_token": {refreshToken},
 		"client_id":     {"desktop"},
 	}
+	return c.postTokenForm(ctx, form, nil)
+}
 
-	raw, err := c.do(ctx, http.MethodPost, "/identity/connect/token", "application/x-www-form-urlencoded", "", nil, []byte(form.Encode()))
+func (c *Client) postTokenForm(ctx context.Context, form url.Values, headers map[string]string) (*TokenResponse, error) {
+	body := []byte(form.Encode())
+	defer crypto.ZeroBytes(body)
+
+	raw, err := c.do(ctx, http.MethodPost, "/identity/connect/token", "application/x-www-form-urlencoded", "", headers, body)
 	if err != nil {
 		return nil, err
 	}

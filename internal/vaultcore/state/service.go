@@ -114,10 +114,8 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 	// Sign In Again goes only to the server this account last signed in to,
 	// as the secret store records it; nothing, prelogin included, is sent
 	// anywhere else.
-	if want := req.SameAccount; want != nil {
-		if trusted := s.TrustedServerURL(want.ID); trusted != "" && serverOrigin(trusted) != serverOrigin(serverURL) {
-			return ErrDifferentAccount
-		}
+	if err := s.checkSameAccountOrigin(req.SameAccount, serverURL); err != nil {
+		return err
 	}
 	client, kdfCfg, masterKey, pwHash, err := s.prepareLogin(ctx, req)
 	if err != nil {
@@ -150,6 +148,86 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 		return err
 	}
 
+	return s.completeLogin(ctx, gen, client, serverURL, email, kdfCfg, tok, userKey, req.SameAccount, rememberKey)
+}
+
+func (s *Service) LoginWithAPIKey(ctx context.Context, req LoginAPIKeyRequest) error {
+	gen := s.attemptFrom(ctx)
+	serverURL := strings.TrimRight(strings.TrimSpace(req.ServerURL), "/")
+	clientID := strings.TrimSpace(req.ClientID)
+	clientSecret := strings.TrimSpace(req.ClientSecret)
+	email := crypto.NormalizeEmail(req.Email)
+	if serverURL == "" {
+		return errors.New("state: server URL is required")
+	}
+	if clientID == "" || clientSecret == "" {
+		return errors.New("state: client ID and client secret are required")
+	}
+	if email == "" {
+		return errors.New("state: email is required")
+	}
+	if len(req.MasterPassword) == 0 {
+		return errors.New("state: master password is required")
+	}
+	if err := s.checkSameAccountOrigin(req.SameAccount, serverURL); err != nil {
+		return err
+	}
+
+	client, err := s.newAPIClient(serverURL)
+	if err != nil {
+		return err
+	}
+	tok, err := client.LoginAPIKey(ctx, clientID, clientSecret)
+	if err != nil {
+		return err
+	}
+
+	kdfCfg, ok := tok.KDFConfig()
+	if !ok {
+		kdfCfg, err = client.Prelogin(ctx, email)
+		if err != nil {
+			return err
+		}
+	}
+
+	masterKey, err := crypto.DeriveMasterKey(req.MasterPassword, email, kdfCfg)
+	if err != nil {
+		return err
+	}
+	defer crypto.ZeroBytes(masterKey[:])
+
+	userKey, err := crypto.DecryptUserKey(tok.Key, masterKey)
+	if err != nil {
+		return err
+	}
+
+	return s.completeLogin(ctx, gen, client, serverURL, email, kdfCfg, tok, userKey, req.SameAccount, "")
+}
+
+func (s *Service) checkSameAccountOrigin(want *Account, serverURL string) error {
+	if want == nil {
+		return nil
+	}
+	if trusted := s.TrustedServerURL(want.ID); trusted != "" && serverOrigin(trusted) != serverOrigin(serverURL) {
+		return ErrDifferentAccount
+	}
+	if want.ServerURL != "" && serverOrigin(want.ServerURL) != serverOrigin(serverURL) {
+		return ErrDifferentAccount
+	}
+	return nil
+}
+
+func (s *Service) completeLogin(
+	ctx context.Context,
+	gen uint64,
+	client *api.Client,
+	serverURL, email string,
+	kdfCfg crypto.KDFConfig,
+	tok *api.TokenResponse,
+	userKey *crypto.SymmetricKey,
+	sameAccount *Account,
+	rememberKey string,
+) error {
 	// The revision is read before the vault, so a change made in between
 	// makes the snapshot look older, never newer, than it is.
 	revDate, _ := client.RevisionDate(ctx, tok.AccessToken)
@@ -175,7 +253,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 	if accountID == "" {
 		accountID = crypto.NormalizeEmail(email)
 	}
-	if want := req.SameAccount; want != nil && (want.ID != accountID || serverOrigin(want.ServerURL) != serverOrigin(serverURL)) {
+	if sameAccount != nil && (sameAccount.ID != accountID || serverOrigin(sameAccount.ServerURL) != serverOrigin(serverURL)) {
 		userKey.Zero()
 		return ErrDifferentAccount
 	}
@@ -198,7 +276,7 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 		userKey.Zero()
 		return err
 	}
-	if s.cfg.Secrets != nil && tok.RefreshToken != "" {
+	if s.cfg.Secrets != nil {
 		// secretMu orders this write with logout's deletion: a logout that
 		// began first wins, and one that comes later deletes the token.
 		s.secretMu.Lock()
@@ -207,7 +285,12 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 			userKey.Zero()
 			return ErrLocked
 		}
-		err := s.saveRefreshToken(accountID, snap.ServerURL, tok.RefreshToken)
+		var err error
+		if tok.RefreshToken != "" {
+			err = s.saveRefreshToken(accountID, snap.ServerURL, tok.RefreshToken)
+		} else {
+			err = s.cfg.Secrets.Delete(refreshTokenKeyPrefix + accountID)
+		}
 		if err == nil {
 			err = s.saveSignInRecord(accountID, snap.ServerURL)
 		}
@@ -216,9 +299,9 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) error {
 			userKey.Zero()
 			return err
 		}
-	}
-	if s.cfg.Secrets != nil && tok.TwoFactorToken != "" {
-		_ = s.cfg.Secrets.Set(rememberKey, tok.TwoFactorToken)
+		if rememberKey != "" && tok.TwoFactorToken != "" {
+			_ = s.cfg.Secrets.Set(rememberKey, tok.TwoFactorToken)
+		}
 	}
 
 	s.mu.Lock()

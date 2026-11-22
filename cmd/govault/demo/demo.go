@@ -139,6 +139,15 @@ func (s *Service) Login(_ context.Context, req state.LoginRequest) error {
 	return nil
 }
 
+func (s *Service) LoginWithAPIKey(_ context.Context, req state.LoginAPIKeyRequest) error {
+	if strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.ClientSecret) == "" || len(req.MasterPassword) == 0 {
+		return api.ErrUnauthorized
+	}
+	time.Sleep(350 * time.Millisecond)
+	s.setStatus(state.StatusUnlocked)
+	return nil
+}
+
 func (s *Service) SendEmailTwoFactorCode(context.Context, state.LoginRequest) error { return nil }
 
 func (s *Service) UnlockWithPassword(_ context.Context, pw []byte) error {

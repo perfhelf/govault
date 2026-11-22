@@ -20,6 +20,7 @@ func LoginView(cx *core.Scope, m *AppModel) core.Node {
 }
 
 func signInView(cx *core.Scope, m *AppModel) core.Node {
+	apiKeyMode := func() bool { return m.LoginAuthMode.Get() == AuthModeAPIKey }
 	return authScreen("login-screen", []core.Node{
 		core.View{
 			Class: "items-center gap-2.5 pb-1",
@@ -30,6 +31,20 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 					Class:   "text-[12.5px] text-gv-fg2 text-center",
 					Content: "Connect to your Bitwarden or Vaultwarden server.",
 				},
+			},
+		},
+		ui.Tabs[LoginAuthMode]{
+			TestID: "login-auth-mode",
+			Equal:  true,
+			Label:  "Sign-in method",
+			Options: []ui.Option[LoginAuthMode]{
+				{Value: AuthModePassword, Label: "Password", TestID: "login-mode-password", Disabled: m.LoginBusy.Get},
+				{Value: AuthModeAPIKey, Label: "API Key", TestID: "login-mode-apikey", Disabled: m.LoginBusy.Get},
+			},
+			Value: m.LoginAuthMode.Get,
+			OnChange: func(mode LoginAuthMode) {
+				m.LoginAuthMode.Set(mode)
+				m.LoginError.Set("")
 			},
 		},
 		core.View{
@@ -51,6 +66,33 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 					OnChange:      m.LoginEmail.Set,
 					Disabled:      func() bool { return m.LoginBusy.Get() || m.CanReturnToUnlock() },
 				})),
+				core.Show{
+					When: apiKeyMode,
+					Then: func(cx *core.Scope) core.Node {
+						return core.View{
+							TestID: "login-apikey-fields",
+							Class:  "gap-3.5",
+							Children: []core.Node{
+								formField("Client ID", authInput(base.Input{
+									TestID:        "login-client-id",
+									Placeholder:   "user.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+									NoAutoCorrect: true,
+									Value:         m.LoginClientID.Get,
+									OnChange:      m.LoginClientID.Set,
+									Disabled:      m.LoginBusy.Get,
+								})),
+								formField("Client Secret", passwordField(cx, base.Input{
+									TestID:        "login-client-secret",
+									Placeholder:   "API client secret",
+									NoAutoCorrect: true,
+									Value:         m.LoginClientSecret.Get,
+									OnChange:      m.LoginClientSecret.Set,
+									Disabled:      m.LoginBusy.Get,
+								}, authFieldHeight, m.LoginShowClientSecret, "login-toggle-client-secret")),
+							},
+						}
+					},
+				},
 				formField("Master Password", passwordField(cx, base.Input{
 					TestID:        "login-password",
 					Placeholder:   "Required",
@@ -60,15 +102,30 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 					OnSubmit:      func(string) { m.Login() },
 					Disabled:      m.LoginBusy.Get,
 				}, authFieldHeight, m.LoginShowPW, "login-toggle-pw")),
+				core.Show{
+					When: apiKeyMode,
+					Then: func(cx *core.Scope) core.Node {
+						return core.Text{
+							TestID:  "login-apikey-local-note",
+							Class:   "text-[11.5px] text-gv-fg3",
+							Content: "Your Client ID and Secret authenticate with the server; your master password only decrypts your vault locally.",
+						}
+					},
+				},
 			},
 		},
 		core.Show{
 			When: func() bool { return api.InsecureServer(m.LoginServer.Get()) },
 			Then: func(cx *core.Scope) core.Node {
 				return core.Text{
-					TestID:  "login-insecure",
-					Class:   "text-[12px] text-gv-warn",
-					Content: "This server does not use HTTPS. Your master password and vault data are sent unencrypted; use it only on a network you trust.",
+					TestID: "login-insecure",
+					Class:  "text-[12px] text-gv-warn",
+					ContentFunc: func() string {
+						if apiKeyMode() {
+							return "This server does not use HTTPS. Your API secret and vault data are sent unencrypted; use it only on a network you trust."
+						}
+						return "This server does not use HTTPS. Your master password and vault data are sent unencrypted; use it only on a network you trust."
+					},
 				}
 			},
 		},
@@ -107,25 +164,31 @@ func authScreen(testID string, body []core.Node, footnote string) core.Node {
 		Class:  "flex-1 bg-gv-canvas",
 		Children: []core.Node{
 			core.View{Style: core.Style{Height: core.Pt(titleBarHeight)}, Desktop: dragRegion()},
-			core.View{
-				Class: "flex-1 items-center justify-center px-8 pb-[52px] gap-5",
+			core.Scroll{
+				Class: "flex-1",
 				Children: []core.Node{
 					core.View{
-						Class: "w-[380px] px-8 pt-8 pb-7 gap-5 rounded-[16px] bg-gv-card border border-gv-line",
-						Style: core.Style{
-							BorderCurve: core.BorderCurveContinuous,
-							Shadows: []core.BoxShadow{
-								ui.Shadow(0, 1, 3, 0, core.RGBA(0x000000, 0.05)),
-								ui.Shadow(0, 18, 40, -16, core.RGBA(0x000000, 0.22)),
-							},
-						},
-						Children: body,
-					},
-					core.View{
-						Class: "flex-row items-center gap-1.5",
+						Class: "items-center justify-center px-8 pb-[52px] pt-2 gap-5",
+						Style: core.Style{MinHeight: core.Pct(100)},
 						Children: []core.Node{
-							icon(lucide.LockKeyhole(), 11, "text-gv-fg3"),
-							core.Text{Class: "text-[11.5px] text-gv-fg3", Content: footnote},
+							core.View{
+								Class: "w-[380px] px-8 pt-8 pb-7 gap-5 rounded-[16px] bg-gv-card border border-gv-line",
+								Style: core.Style{
+									BorderCurve: core.BorderCurveContinuous,
+									Shadows: []core.BoxShadow{
+										ui.Shadow(0, 1, 3, 0, core.RGBA(0x000000, 0.05)),
+										ui.Shadow(0, 18, 40, -16, core.RGBA(0x000000, 0.22)),
+									},
+								},
+								Children: body,
+							},
+							core.View{
+								Class: "flex-row items-center gap-1.5",
+								Children: []core.Node{
+									icon(lucide.LockKeyhole(), 11, "text-gv-fg3"),
+									core.Text{Class: "text-[11.5px] text-gv-fg3", Content: footnote},
+								},
+							},
 						},
 					},
 				},

@@ -52,6 +52,13 @@ const (
 	RouteImport
 )
 
+type LoginAuthMode string
+
+const (
+	AuthModePassword LoginAuthMode = "password"
+	AuthModeAPIKey   LoginAuthMode = "apikey"
+)
+
 type UserPrefs struct {
 	DeviceID              string                `json:"deviceId"`
 	AccountID             string                `json:"accountId"`
@@ -391,12 +398,16 @@ type AppModel struct {
 	BiometricKind     *core.Signal[core.BiometricKind]
 	BiometricHardware *core.Signal[bool]
 
-	LoginServer   *core.Signal[string]
-	LoginEmail    *core.Signal[string]
-	LoginPassword *core.Signal[string]
-	LoginBusy     *core.Signal[bool]
-	LoginError    *core.Signal[string]
-	LoginShowPW   *core.Signal[bool]
+	LoginAuthMode         *core.Signal[LoginAuthMode]
+	LoginServer           *core.Signal[string]
+	LoginEmail            *core.Signal[string]
+	LoginPassword         *core.Signal[string]
+	LoginClientID         *core.Signal[string]
+	LoginClientSecret     *core.Signal[string]
+	LoginBusy             *core.Signal[bool]
+	LoginError            *core.Signal[string]
+	LoginShowPW           *core.Signal[bool]
+	LoginShowClientSecret *core.Signal[bool]
 
 	TwoFactor         *core.Signal[*TwoFactorPrompt]
 	TwoFactorProvider *core.Signal[api.TwoFactorProvider]
@@ -563,86 +574,90 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 	p := EnsureDeviceID(prefs)
 
 	m := &AppModel{
-		Scope:               app,
-		Core:                coreSvc,
-		Hooks:               hooks,
-		Prefs:               prefs,
-		LockState:           core.NewSignal(app, coreSvc.Status()),
-		SyncState:           core.NewSignal(app, SyncIdle),
-		LocalOnly:           core.NewSignal(app, false),
-		CredentialsNotSaved: core.NewSignal(app, false),
-		ReSignIn:            core.NewSignal(app, false),
-		ReSignInServer:      core.NewSignal(app, ""),
-		LastSync:            core.NewSignal(app, time.Time{}),
-		Route:               core.NewSignal(app, RouteVault),
-		BiometricKind:       core.NewSignal(app, core.BiometricNone),
-		BiometricHardware:   core.NewSignal(app, false),
-		LoginServer:         core.NewSignal(app, p.ServerURL),
-		LoginEmail:          core.NewSignal(app, p.Email),
-		LoginPassword:       core.NewSignal(app, ""),
-		LoginBusy:           core.NewSignal(app, false),
-		LoginError:          core.NewSignal(app, ""),
-		LoginShowPW:         core.NewSignal(app, false),
-		TwoFactor:           core.NewSignal[*TwoFactorPrompt](app, nil),
-		TwoFactorProvider:   core.NewSignal(app, api.TwoFactorAuthenticator),
-		TwoFactorCode:       core.NewSignal(app, ""),
-		TwoFactorRemember:   core.NewSignal(app, false),
-		TwoFactorSending:    core.NewSignal(app, false),
-		TwoFactorNotice:     core.NewSignal(app, ""),
-		LockPassword:        core.NewSignal(app, ""),
-		LockBusy:            core.NewSignal(app, false),
-		LockError:           core.NewSignal(app, ""),
-		LockShowPW:          core.NewSignal(app, false),
-		SidebarFilter:       core.NewSignal(app, state.SearchFilter{Category: state.FilterAll}),
-		SearchQuery:         core.NewSignal(app, ""),
-		Folders:             core.NewSignalFunc(app, []state.Folder(nil), nil),
-		Organizations:       core.NewSignalFunc(app, []state.Organization(nil), nil),
-		Collections:         core.NewSignalFunc(app, []state.Collection(nil), nil),
-		AllCounts:           core.NewSignalFunc(app, VaultCounts{ByFolder: map[string]int{}}, nil),
-		Health:              core.NewSignalFunc(app, health.Report{}, nil),
-		FilteredItems:       core.NewCollectionFunc(app, func(c state.CipherSummary) string { return c.ID }, cipherSummaryEqual, nil),
-		SelectedID:          core.NewSignal(app, ""),
-		ActiveCipher:        core.NewSignal[*state.Cipher](app, nil),
-		RevealPW:            core.NewSignal(app, false),
-		RevealCard:          core.NewSignal(app, false),
-		TOTPRevealedID:      core.NewSignal(app, ""),
-		EditMode:            core.NewSignal(app, false),
-		EditDraft:           core.NewSignal[*EditDraft](app, nil),
-		EditDirty:           core.NewSignal(app, false),
-		EditBusy:            core.NewSignal(app, false),
-		EditError:           core.NewSignal(app, ""),
-		TOTPCode:            core.NewSignal(app, ""),
-		TOTPRemaining:       core.NewSignal(app, 0),
-		TOTPPeriod:          core.NewSignal(app, 30),
-		MainWinVisible:      core.NewSignal(app, false),
-		SearchAll:           core.NewSignal(app, false),
-		HealthFilter:        core.NewSignal(app, HealthAll),
-		CanGoBack:           core.NewSignal(app, false),
-		CanGoForward:        core.NewSignal(app, false),
-		SidebarW:            core.NewSignal(app, clampWidth(p.SidebarWidth, MinSidebarWidth, MaxSidebarWidth, DefaultSidebarWidth)),
-		ListW:               core.NewSignal(app, clampWidth(p.ListWidth, MinListWidth, MaxListWidth, DefaultListWidth)),
-		GenResult:           core.NewSignal(app, ""),
-		Reprompt:            core.NewSignalFunc(app, RepromptModal{}, nil),
-		RepromptPW:          core.NewSignal(app, ""),
-		RepromptError:       core.NewSignal(app, ""),
-		RepromptBusy:        core.NewSignal(app, false),
-		FolderDialog:        core.NewSignal(app, FolderModal{}),
-		FolderError:         core.NewSignal(app, ""),
-		FolderBusy:          core.NewSignal(app, false),
-		AttachmentBusy:      core.NewSignal(app, ""),
-		TrashBusy:           core.NewSignal(app, false),
-		BackupDialog:        core.NewSignal(app, BackupNone),
-		BackupPW:            core.NewSignal(app, ""),
-		BackupPW2:           core.NewSignal(app, ""),
-		BackupError:         core.NewSignal(app, ""),
-		BackupBusy:          core.NewSignal(app, false),
-		ImportSession:       core.NewSignalFunc[*ImportSession](app, nil, nil),
-		ImportRev:           core.NewSignal(app, 0),
-		ImportShowIdentical: core.NewSignal(app, false),
-		ImportBusy:          core.NewSignal(app, false),
-		SSHAgentError:       core.NewSignal(app, ""),
-		vaultRev:            core.NewSignal(app, 0),
-		Toaster:             ui.NewToaster(app),
+		Scope:                 app,
+		Core:                  coreSvc,
+		Hooks:                 hooks,
+		Prefs:                 prefs,
+		LockState:             core.NewSignal(app, coreSvc.Status()),
+		SyncState:             core.NewSignal(app, SyncIdle),
+		LocalOnly:             core.NewSignal(app, false),
+		CredentialsNotSaved:   core.NewSignal(app, false),
+		ReSignIn:              core.NewSignal(app, false),
+		ReSignInServer:        core.NewSignal(app, ""),
+		LastSync:              core.NewSignal(app, time.Time{}),
+		Route:                 core.NewSignal(app, RouteVault),
+		BiometricKind:         core.NewSignal(app, core.BiometricNone),
+		BiometricHardware:     core.NewSignal(app, false),
+		LoginAuthMode:         core.NewSignal(app, AuthModePassword),
+		LoginServer:           core.NewSignal(app, p.ServerURL),
+		LoginEmail:            core.NewSignal(app, p.Email),
+		LoginPassword:         core.NewSignal(app, ""),
+		LoginClientID:         core.NewSignal(app, ""),
+		LoginClientSecret:     core.NewSignal(app, ""),
+		LoginBusy:             core.NewSignal(app, false),
+		LoginError:            core.NewSignal(app, ""),
+		LoginShowPW:           core.NewSignal(app, false),
+		LoginShowClientSecret: core.NewSignal(app, false),
+		TwoFactor:             core.NewSignal[*TwoFactorPrompt](app, nil),
+		TwoFactorProvider:     core.NewSignal(app, api.TwoFactorAuthenticator),
+		TwoFactorCode:         core.NewSignal(app, ""),
+		TwoFactorRemember:     core.NewSignal(app, false),
+		TwoFactorSending:      core.NewSignal(app, false),
+		TwoFactorNotice:       core.NewSignal(app, ""),
+		LockPassword:          core.NewSignal(app, ""),
+		LockBusy:              core.NewSignal(app, false),
+		LockError:             core.NewSignal(app, ""),
+		LockShowPW:            core.NewSignal(app, false),
+		SidebarFilter:         core.NewSignal(app, state.SearchFilter{Category: state.FilterAll}),
+		SearchQuery:           core.NewSignal(app, ""),
+		Folders:               core.NewSignalFunc(app, []state.Folder(nil), nil),
+		Organizations:         core.NewSignalFunc(app, []state.Organization(nil), nil),
+		Collections:           core.NewSignalFunc(app, []state.Collection(nil), nil),
+		AllCounts:             core.NewSignalFunc(app, VaultCounts{ByFolder: map[string]int{}}, nil),
+		Health:                core.NewSignalFunc(app, health.Report{}, nil),
+		FilteredItems:         core.NewCollectionFunc(app, func(c state.CipherSummary) string { return c.ID }, cipherSummaryEqual, nil),
+		SelectedID:            core.NewSignal(app, ""),
+		ActiveCipher:          core.NewSignal[*state.Cipher](app, nil),
+		RevealPW:              core.NewSignal(app, false),
+		RevealCard:            core.NewSignal(app, false),
+		TOTPRevealedID:        core.NewSignal(app, ""),
+		EditMode:              core.NewSignal(app, false),
+		EditDraft:             core.NewSignal[*EditDraft](app, nil),
+		EditDirty:             core.NewSignal(app, false),
+		EditBusy:              core.NewSignal(app, false),
+		EditError:             core.NewSignal(app, ""),
+		TOTPCode:              core.NewSignal(app, ""),
+		TOTPRemaining:         core.NewSignal(app, 0),
+		TOTPPeriod:            core.NewSignal(app, 30),
+		MainWinVisible:        core.NewSignal(app, false),
+		SearchAll:             core.NewSignal(app, false),
+		HealthFilter:          core.NewSignal(app, HealthAll),
+		CanGoBack:             core.NewSignal(app, false),
+		CanGoForward:          core.NewSignal(app, false),
+		SidebarW:              core.NewSignal(app, clampWidth(p.SidebarWidth, MinSidebarWidth, MaxSidebarWidth, DefaultSidebarWidth)),
+		ListW:                 core.NewSignal(app, clampWidth(p.ListWidth, MinListWidth, MaxListWidth, DefaultListWidth)),
+		GenResult:             core.NewSignal(app, ""),
+		Reprompt:              core.NewSignalFunc(app, RepromptModal{}, nil),
+		RepromptPW:            core.NewSignal(app, ""),
+		RepromptError:         core.NewSignal(app, ""),
+		RepromptBusy:          core.NewSignal(app, false),
+		FolderDialog:          core.NewSignal(app, FolderModal{}),
+		FolderError:           core.NewSignal(app, ""),
+		FolderBusy:            core.NewSignal(app, false),
+		AttachmentBusy:        core.NewSignal(app, ""),
+		TrashBusy:             core.NewSignal(app, false),
+		BackupDialog:          core.NewSignal(app, BackupNone),
+		BackupPW:              core.NewSignal(app, ""),
+		BackupPW2:             core.NewSignal(app, ""),
+		BackupError:           core.NewSignal(app, ""),
+		BackupBusy:            core.NewSignal(app, false),
+		ImportSession:         core.NewSignalFunc[*ImportSession](app, nil, nil),
+		ImportRev:             core.NewSignal(app, 0),
+		ImportShowIdentical:   core.NewSignal(app, false),
+		ImportBusy:            core.NewSignal(app, false),
+		SSHAgentError:         core.NewSignal(app, ""),
+		vaultRev:              core.NewSignal(app, 0),
+		Toaster:               ui.NewToaster(app),
 	}
 	m.IsSelected = core.NewSelector(app, m.SelectedID.Get)
 	m.clearHistory()
@@ -919,23 +934,48 @@ func (p *TwoFactorPrompt) Has(provider api.TwoFactorProvider) bool {
 	return p != nil && slices.Contains(p.Providers, provider)
 }
 
-func (m *AppModel) loginRequest() (state.LoginRequest, bool) {
-	req := state.LoginRequest{
-		ServerURL: strings.TrimSpace(m.LoginServer.Get()),
-		Email:     strings.TrimSpace(m.LoginEmail.Get()),
-	}
+func (m *AppModel) resolvedLoginIdentity() (serverURL, email string, sameAccount *state.Account) {
+	serverURL = strings.TrimSpace(m.LoginServer.Get())
+	email = strings.TrimSpace(m.LoginEmail.Get())
 	if m.CanReturnToUnlock() {
 		// Sign In Again renews the vault on this device: its account only,
 		// at its trusted server when one is recorded.
 		acct := m.Core.Account()
 		if trusted := m.ReSignInServer.Get(); trusted != "" {
-			req.ServerURL = trusted
+			serverURL = trusted
 		}
-		acct.ServerURL = req.ServerURL
-		req.Email, req.SameAccount = acct.Email, &acct
+		acct.ServerURL = serverURL
+		return serverURL, acct.Email, &acct
+	}
+	return serverURL, email, nil
+}
+
+func (m *AppModel) loginRequest() (state.LoginRequest, bool) {
+	serverURL, email, sameAccount := m.resolvedLoginIdentity()
+	req := state.LoginRequest{
+		ServerURL:   serverURL,
+		Email:       email,
+		SameAccount: sameAccount,
 	}
 	password := m.LoginPassword.Get()
 	if req.ServerURL == "" || req.Email == "" || password == "" {
+		return req, false
+	}
+	req.MasterPassword = []byte(password)
+	return req, true
+}
+
+func (m *AppModel) loginAPIKeyRequest() (state.LoginAPIKeyRequest, bool) {
+	serverURL, email, sameAccount := m.resolvedLoginIdentity()
+	req := state.LoginAPIKeyRequest{
+		ServerURL:    serverURL,
+		ClientID:     strings.TrimSpace(m.LoginClientID.Get()),
+		ClientSecret: strings.TrimSpace(m.LoginClientSecret.Get()),
+		Email:        email,
+		SameAccount:  sameAccount,
+	}
+	password := m.LoginPassword.Get()
+	if req.ServerURL == "" || req.Email == "" || req.ClientID == "" || req.ClientSecret == "" || password == "" {
 		return req, false
 	}
 	req.MasterPassword = []byte(password)
@@ -946,12 +986,53 @@ func (m *AppModel) Login() {
 	if m.LoginBusy.Get() {
 		return
 	}
+	if m.LoginAuthMode.Get() == AuthModeAPIKey {
+		req, ok := m.loginAPIKeyRequest()
+		if !ok {
+			m.LoginError.Set("Server URL, email, client ID, client secret, and master password are required.")
+			return
+		}
+		m.submitAPIKeyLogin(req)
+		return
+	}
 	req, ok := m.loginRequest()
 	if !ok {
 		m.LoginError.Set("Server URL, email, and master password are required.")
 		return
 	}
 	m.submitLogin(req)
+}
+
+func (m *AppModel) submitAPIKeyLogin(req state.LoginAPIKeyRequest) {
+	m.ReleaseSecureInput()
+	m.LoginBusy.Set(true)
+	m.LoginError.Set("")
+	ctx := state.WithAuthAttempt(context.Background(), m.Core.AuthAttempt())
+	gen := m.LockGeneration()
+
+	go func() {
+		defer crypto.ZeroBytes(req.MasterPassword)
+		err := m.Core.LoginWithAPIKey(ctx, req)
+		m.Scope.Post(func() {
+			if gen != m.LockGeneration() {
+				return
+			}
+			m.LoginBusy.Set(false)
+			if err != nil {
+				m.loginAPIKeyFailed(err)
+				return
+			}
+			m.finishLogin(req.ServerURL, req.Email)
+		})
+	}()
+}
+
+func (m *AppModel) loginAPIKeyFailed(err error) {
+	if errors.Is(err, api.ErrUnauthorized) {
+		m.LoginError.Set("Invalid client ID or client secret.")
+		return
+	}
+	m.LoginError.Set(friendlyError(err))
 }
 
 func (m *AppModel) VerifyTwoFactor() {
@@ -1104,6 +1185,7 @@ func (m *AppModel) SignInAgain() {
 	trusted := m.Core.TrustedServerURL(acct.ID)
 	m.ReSignIn.Set(true)
 	m.Lock()
+	m.clearAuthInputs()
 	// Only the trusted sign-in record says where to sign in. Without one
 	// the user enters the server; the editable snapshot never fills it.
 	m.ReSignInServer.Set(trusted)
@@ -1126,18 +1208,19 @@ func (m *AppModel) BackToUnlock() {
 	}
 	m.Core.RevokeAuthAttempts()
 	m.RevokePending()
-	m.LoginBusy.Set(false)
-	m.LoginPassword.Set("")
+	m.clearAuthInputs()
 	m.LoginError.Set("")
 	m.TwoFactor.Set(nil)
-	m.TwoFactorCode.Set("")
 	m.ReSignIn.Set(false)
-	m.ReleaseSecureInput()
 }
 
 func (m *AppModel) finishLogin(serverURL, email string) {
 	m.ReSignIn.Set(false)
 	m.LoginPassword.Set("")
+	m.LoginClientID.Set("")
+	m.LoginClientSecret.Set("")
+	m.LoginShowPW.Set(false)
+	m.LoginShowClientSecret.Set(false)
 	m.TwoFactor.Set(nil)
 	m.TwoFactorCode.Set("")
 	m.TwoFactorNotice.Set("")
@@ -1357,6 +1440,7 @@ func (m *AppModel) forgetAccount() {
 		_ = f.ClearAccount(m.Prefs.Get().AccountID)
 	}
 	m.resetFaviconMemory()
+	m.clearAuthInputs()
 	m.UpdatePrefs(func(p UserPrefs) UserPrefs {
 		p.AccountID = ""
 		p.BiometricEnabled = false
@@ -1431,8 +1515,8 @@ func (m *AppModel) LockOnSystemEvent() bool {
 	return true
 }
 
-// clearAuthInputs empties every password field and ends every sign-in or
-// unlock the UI shows as running.
+// clearAuthInputs empties every password and API credential field and ends
+// every sign-in or unlock the UI shows as running.
 func (m *AppModel) clearAuthInputs() {
 	m.LockBusy.Set(false)
 	m.LoginBusy.Set(false)
@@ -1440,6 +1524,10 @@ func (m *AppModel) clearAuthInputs() {
 	m.TwoFactorSending.Set(false)
 	m.LockPassword.Set("")
 	m.LoginPassword.Set("")
+	m.LoginClientID.Set("")
+	m.LoginClientSecret.Set("")
+	m.LoginShowPW.Set(false)
+	m.LoginShowClientSecret.Set(false)
 	m.RepromptPW.Set("")
 	m.TwoFactorCode.Set("")
 	m.ReleaseSecureInput()
@@ -1459,6 +1547,7 @@ func (m *AppModel) Logout(cx *core.Scope) {
 			return
 		}
 		m.RevokePending()
+		m.clearAuthInputs()
 		if m.Hooks.SSHAgent != nil {
 			m.Hooks.SSHAgent.Clear()
 		}

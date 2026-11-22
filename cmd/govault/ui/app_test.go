@@ -47,14 +47,19 @@ type mockVaultService struct {
 	noPremium  bool
 	// session names the mock's current session; archiveSessions records
 	// the session each archive request was bound to.
-	session         int
-	archiveSessions []any
-	uploads         int
-	attempt         uint64
-	revokes         int
-	localOnly       bool
-	credsUnsaved    bool
-	lastLogin       state.LoginRequest
+	session            int
+	archiveSessions    []any
+	uploads            int
+	attempt            uint64
+	revokes            int
+	localOnly          bool
+	credsUnsaved       bool
+	lastLogin          state.LoginRequest
+	apiClientID        string
+	apiClientSecret    string
+	lastAPIKeyLogin    state.LoginAPIKeyRequest
+	apiKeyLoginStarted chan struct{}
+	apiKeyLoginGate    chan struct{}
 	// trustedServer is the server the trusted sign-in record names.
 	trustedServer string
 	// emailGate, when set, holds SendEmailTwoFactorCode until closed.
@@ -87,8 +92,10 @@ func newMockVaultService(initial state.LockStatus) *mockVaultService {
 		SecureNote: &state.SecureNote{Type: 0},
 	}
 	return &mockVaultService{
-		status:   initial,
-		password: "master-password",
+		status:          initial,
+		password:        "master-password",
+		apiClientID:     "user.api-client-id",
+		apiClientSecret: "api-client-secret",
 		ciphers: map[string]*state.Cipher{
 			c1.ID: c1,
 			c2.ID: c2,
@@ -121,6 +128,31 @@ func (m *mockVaultService) Login(_ context.Context, req state.LoginRequest) erro
 			Providers:    []api.TwoFactorProvider{api.TwoFactorAuthenticator, api.TwoFactorEmail},
 			ProviderData: map[api.TwoFactorProvider]json.RawMessage{api.TwoFactorEmail: json.RawMessage(`{"Email":"a***@example.com"}`)},
 		}}
+	}
+	m.status = state.StatusUnlocked
+	return nil
+}
+
+func (m *mockVaultService) LoginWithAPIKey(_ context.Context, req state.LoginAPIKeyRequest) error {
+	m.mu.RLock()
+	started, gate := m.apiKeyLoginStarted, m.apiKeyLoginGate
+	m.mu.RUnlock()
+	if started != nil {
+		close(started)
+	}
+	if gate != nil {
+		<-gate
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := req
+	cp.MasterPassword = slices.Clone(req.MasterPassword)
+	m.lastAPIKeyLogin = cp
+	if req.ClientID != m.apiClientID || req.ClientSecret != m.apiClientSecret {
+		return api.ErrUnauthorized
+	}
+	if string(req.MasterPassword) != m.password {
+		return crypto.ErrInvalidMAC
 	}
 	m.status = state.StatusUnlocked
 	return nil
