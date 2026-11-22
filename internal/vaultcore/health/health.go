@@ -1,5 +1,5 @@
-// Package health analyzes the decrypted vault locally for password and card
-// hygiene issues. It performs no network calls.
+// Package health analyzes the decrypted vault locally for password, card,
+// website, and metadata hygiene issues. It performs no network calls.
 package health
 
 import (
@@ -21,6 +21,7 @@ import (
 const (
 	MinPasswordLength = 10
 	ExpiringWindow    = 60 * 24 * time.Hour
+	StaleWindow       = 365 * 24 * time.Hour
 )
 
 // Issue points at one flagged item. It never carries secret values.
@@ -43,10 +44,17 @@ type CardIssue struct {
 }
 
 type Report struct {
-	Reused    []ReusedGroup
-	Weak      []Issue
-	Cards     []CardIssue
-	Unsecured []Issue
+	Reused      []ReusedGroup
+	Weak        []Issue
+	Empty       []Issue
+	Stale       []Issue
+	Cards       []CardIssue
+	Unsecured   []Issue
+	MissingURI  []Issue
+	MissingName []Issue
+	Unreadable  []Issue
+	ActiveItems int
+	Score       int
 }
 
 func (r Report) ReusedItems() int {
@@ -57,36 +65,101 @@ func (r Report) ReusedItems() int {
 	return n
 }
 
-func (r Report) TotalIssues() int {
-	return r.ReusedItems() + len(r.Weak) + len(r.Cards) + len(r.Unsecured)
+func (r Report) HighRisk() int {
+	n := len(r.Weak) + len(r.Empty) + len(r.Unreadable)
+	for _, c := range r.Cards {
+		if c.Expired {
+			n++
+		}
+	}
+	return n
 }
 
-// Analyze inspects active items. Items in Trash are skipped, and logins whose
-// password is hidden by an organization are left out of password checks.
+func (r Report) MediumRisk() int {
+	n := r.ReusedItems() + len(r.Stale) + len(r.Unsecured)
+	for _, c := range r.Cards {
+		if !c.Expired {
+			n++
+		}
+	}
+	return n
+}
+
+func (r Report) LowRisk() int {
+	return len(r.MissingURI) + len(r.MissingName)
+}
+
+func (r Report) TotalIssues() int {
+	return r.ReusedItems() + len(r.Weak) + len(r.Empty) + len(r.Stale) +
+		len(r.Cards) + len(r.Unsecured) + len(r.MissingURI) + len(r.MissingName) + len(r.Unreadable)
+}
+
+// Analyze inspects active items. Items in Trash (DeletedDate != nil) are
+// skipped, while archived items (ArchivedDate != nil) remain included. Logins
+// whose password is hidden by an organization are left out of password checks.
 func Analyze(ciphers []*state.Cipher, now time.Time) Report {
+	return AnalyzeReport(ciphers, nil, now)
+}
+
+// AnalyzeReport inspects active items and records unreadable personal cipher
+// IDs reported by the vault service. Items in Trash (DeletedDate != nil) are
+// skipped, while archived items (ArchivedDate != nil) remain included. Logins
+// whose password is hidden by an organization are left out of password checks.
+func AnalyzeReport(ciphers []*state.Cipher, unreadableIDs []string, now time.Time) Report {
 	var r Report
 	byPassword := map[string][]*state.Cipher{}
 	for _, c := range ciphers {
 		if c == nil || c.DeletedDate != nil {
 			continue
 		}
+		r.ActiveItems++
+		if strings.TrimSpace(c.Name) == "" {
+			r.MissingName = append(r.MissingName, missingNameIssue(c))
+		}
 		switch {
 		case c.Login != nil && c.Type == api.CipherTypeLogin:
 			if uri, ok := insecureURI(c.Login.URIs); ok {
 				r.Unsecured = append(r.Unsecured, issue(c, uri))
 			}
-			if c.HidePassword || c.Login.Password == "" {
+			if !hasNonEmptyURI(c.Login.URIs) {
+				r.MissingURI = append(r.MissingURI, issue(c, "No website URI"))
+			}
+			if c.HidePassword {
+				continue
+			}
+			if strings.TrimSpace(c.Login.Password) == "" {
+				if len(c.Login.Fido2Credentials) == 0 {
+					r.Empty = append(r.Empty, issue(c, "No password set"))
+				}
 				continue
 			}
 			byPassword[c.Login.Password] = append(byPassword[c.Login.Password], c)
 			if reason := WeakReason(c.Login.Password); reason != "" {
 				r.Weak = append(r.Weak, issue(c, reason))
 			}
+			if detail, stale := staleDetail(c, now); stale {
+				r.Stale = append(r.Stale, issue(c, detail))
+			}
 		case c.Card != nil && c.Type == api.CipherTypeCard:
 			if ci, ok := cardIssue(c, now); ok {
 				r.Cards = append(r.Cards, ci)
 			}
 		}
+	}
+	seenUnreadable := map[string]bool{}
+	for _, rawID := range unreadableIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" || seenUnreadable[id] {
+			continue
+		}
+		seenUnreadable[id] = true
+		r.ActiveItems++
+		r.Unreadable = append(r.Unreadable, Issue{
+			CipherID: id,
+			Name:     "Unreadable item",
+			Subtitle: "Item ID: " + id,
+			Detail:   "Could not decrypt",
+		})
 	}
 	for _, group := range byPassword {
 		if len(group) < 2 {
@@ -106,7 +179,12 @@ func Analyze(ciphers []*state.Cipher, now time.Time) Report {
 		return compareIssue(a.Items[0], b.Items[0])
 	})
 	sortIssues(r.Weak)
+	sortIssues(r.Empty)
+	sortIssues(r.Stale)
 	sortIssues(r.Unsecured)
+	sortIssues(r.MissingURI)
+	sortIssues(r.MissingName)
+	sortIssues(r.Unreadable)
 	slices.SortFunc(r.Cards, func(a, b CardIssue) int {
 		if a.Expired != b.Expired {
 			if a.Expired {
@@ -116,7 +194,52 @@ func Analyze(ciphers []*state.Cipher, now time.Time) Report {
 		}
 		return compareIssue(a.Issue, b.Issue)
 	})
+	r.Score = computeScore(r)
 	return r
+}
+
+func computeScore(r Report) int {
+	if r.TotalIssues() == 0 || r.ActiveItems <= 0 {
+		return 100
+	}
+	weighted := float64(r.HighRisk())*3.0 + float64(r.MediumRisk())*1.5 + float64(r.LowRisk())*0.5
+	penalty := (weighted / float64(r.ActiveItems)) * 25.0
+	score := int(math.Round(100.0 - penalty))
+	if score < 0 {
+		return 0
+	}
+	if score > 99 {
+		return 99
+	}
+	return score
+}
+
+func staleDetail(c *state.Cipher, now time.Time) (string, bool) {
+	rev := c.Login.PasswordRevisionDate
+	if rev == nil {
+		rev = c.RevisionDate
+	}
+	if rev == nil || rev.IsZero() {
+		return "", false
+	}
+	age := now.Sub(*rev)
+	if age <= StaleWindow {
+		return "", false
+	}
+	days := int(age / (24 * time.Hour))
+	if days >= 730 {
+		return fmt.Sprintf("Unchanged for %d years", days/365), true
+	}
+	return fmt.Sprintf("Unchanged for %d days", days), true
+}
+
+func hasNonEmptyURI(uris []state.LoginURI) bool {
+	for _, u := range uris {
+		if strings.TrimSpace(u.URI) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func issue(c *state.Cipher, detail string) Issue {
@@ -129,12 +252,47 @@ func issue(c *state.Cipher, detail string) Issue {
 		if sub == "" {
 			sub = c.Card.CardholderName
 		}
+	case c.Identity != nil:
+		sub = c.Identity.Email
+		if sub == "" {
+			sub = strings.TrimSpace(c.Identity.FirstName + " " + c.Identity.LastName)
+		}
+	case c.SSHKey != nil:
+		sub = c.SSHKey.KeyFingerprint
 	}
 	return Issue{CipherID: c.ID, Type: c.Type, Name: c.Name, Subtitle: sub, Detail: detail}
 }
 
+func missingNameIssue(c *state.Cipher) Issue {
+	it := issue(c, "Missing title")
+	if strings.TrimSpace(it.Subtitle) == "" {
+		it.Subtitle = cipherTypeName(c.Type)
+	}
+	return it
+}
+
+func cipherTypeName(t api.CipherType) string {
+	switch t {
+	case api.CipherTypeLogin:
+		return "Login"
+	case api.CipherTypeSecureNote:
+		return "Secure Note"
+	case api.CipherTypeCard:
+		return "Card"
+	case api.CipherTypeIdentity:
+		return "Identity"
+	case api.CipherTypeSSHKey:
+		return "SSH Key"
+	default:
+		return "Item"
+	}
+}
+
 func compareIssue(a, b Issue) int {
-	return cmp.Or(strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), strings.Compare(a.CipherID, b.CipherID))
+	return cmp.Or(
+		strings.Compare(strings.ToLower(strings.TrimSpace(a.Name)), strings.ToLower(strings.TrimSpace(b.Name))),
+		strings.Compare(a.CipherID, b.CipherID),
+	)
 }
 
 func sortIssues(items []Issue) { slices.SortFunc(items, compareIssue) }
