@@ -9,11 +9,16 @@ import (
 type HealthCategory string
 
 const (
-	HealthAll       HealthCategory = ""
-	HealthReused    HealthCategory = "reused"
-	HealthWeak      HealthCategory = "weak"
-	HealthCards     HealthCategory = "cards"
-	HealthUnsecured HealthCategory = "unsecured"
+	HealthAll         HealthCategory = ""
+	HealthReused      HealthCategory = "reused"
+	HealthWeak        HealthCategory = "weak"
+	HealthEmpty       HealthCategory = "empty"
+	HealthStale       HealthCategory = "stale"
+	HealthCards       HealthCategory = "cards"
+	HealthUnsecured   HealthCategory = "unsecured"
+	HealthMissingURI  HealthCategory = "missing-uri"
+	HealthMissingName HealthCategory = "missing-name"
+	HealthUnreadable  HealthCategory = "unreadable"
 )
 
 // NavState is one place the user visited, as Back and Forward restore it.

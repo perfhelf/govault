@@ -1760,7 +1760,7 @@ func (m *AppModel) recomputeHealth() {
 	for _, c := range ciphers {
 		c.HidePassword = c.HidePassword || m.PasswordHidden(c)
 	}
-	m.Health.Set(health.Analyze(ciphers, time.Now()))
+	m.Health.Set(health.AnalyzeReport(ciphers, m.Core.UnreadableItems(), time.Now()))
 }
 
 // OpenHealthItem shows the flagged item in the vault so it can be reviewed.
