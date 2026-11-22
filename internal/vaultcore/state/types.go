@@ -93,6 +93,7 @@ type CipherSummary struct {
 
 	OrganizationID *string
 	CollectionIDs  []string
+	ReadOnly       bool
 }
 
 type Cipher struct {
@@ -345,6 +346,10 @@ type VaultService interface {
 	SoftDeleteCipher(ctx context.Context, id string) error
 	RestoreCipher(ctx context.Context, id string) error
 	HardDeleteCipher(ctx context.Context, id string) error
+	BulkSoftDelete(ctx context.Context, ids []string) error
+	BulkMoveFolder(ctx context.Context, ids []string, folderID *string) error
+	BulkRestore(ctx context.Context, ids []string, targetFolderID *string) error
+	BulkHardDelete(ctx context.Context, ids []string) error
 	TrashSelection() TrashSelection
 	ArchiveCipher(ctx context.Context, id string) error
 	UnarchiveCipher(ctx context.Context, id string) error

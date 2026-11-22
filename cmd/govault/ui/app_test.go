@@ -64,6 +64,10 @@ type mockVaultService struct {
 	unlockCommitted chan struct{}
 	// saveGate, when set, holds SaveCipher until it is closed.
 	saveGate chan struct{}
+	// batchGate, when set, holds Bulk* operations until it is closed.
+	batchGate chan struct{}
+	bulkErr   error
+	bulkCalls []string
 }
 
 func newMockVaultService(initial state.LockStatus) *mockVaultService {
@@ -225,7 +229,17 @@ func (m *mockVaultService) Search(query string, filter state.SearchFilter) []sta
 		if filter.Type != nil && c.Type != *filter.Type {
 			continue
 		}
+		if filter.OrganizationID != "" && (c.OrganizationID == nil || *c.OrganizationID != filter.OrganizationID) {
+			continue
+		}
 		if filter.CollectionID != "" && !slices.Contains(c.CollectionIDs, filter.CollectionID) {
+			continue
+		}
+		if filter.FolderID != "" {
+			if c.FolderID == nil || *c.FolderID != filter.FolderID {
+				continue
+			}
+		} else if filter.Category == state.FilterNoFolder && (c.FolderID != nil && *c.FolderID != "") {
 			continue
 		}
 		if q != "" && !strings.Contains(strings.ToLower(c.Name), q) {
@@ -252,6 +266,7 @@ func (m *mockVaultService) Search(query string, filter state.SearchFilter) []sta
 
 			OrganizationID: c.OrganizationID,
 			CollectionIDs:  c.CollectionIDs,
+			ReadOnly:       m.isReadOnlyLocked(c),
 		})
 	}
 	return out
@@ -327,6 +342,160 @@ func (m *mockVaultService) HardDeleteCipher(_ context.Context, id string) error 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.ciphers, id)
+	return nil
+}
+
+func (m *mockVaultService) isReadOnlyLocked(c *state.Cipher) bool {
+	if c.ReadOnly {
+		return true
+	}
+	if len(c.CollectionIDs) == 0 || len(m.collections) == 0 {
+		return false
+	}
+	known := 0
+	for _, id := range c.CollectionIDs {
+		idx := slices.IndexFunc(m.collections, func(col state.Collection) bool { return col.ID == id })
+		if idx < 0 {
+			continue
+		}
+		if !m.collections[idx].ReadOnly {
+			return false
+		}
+		known++
+	}
+	return known > 0
+}
+
+func (m *mockVaultService) prepareMockBulk(ctx context.Context, op string, ids []string) ([]string, error) {
+	m.mu.RLock()
+	gate := m.batchGate
+	m.mu.RUnlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.status != state.StatusUnlocked {
+		return nil, state.ErrLocked
+	}
+	if m.localOnly {
+		return nil, state.ErrSignInRequired
+	}
+	if m.bulkErr != nil {
+		return nil, m.bulkErr
+	}
+	seen := make(map[string]bool, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		c, ok := m.ciphers[id]
+		if !ok {
+			return nil, state.ErrCipherNotFound
+		}
+		if m.isReadOnlyLocked(c) {
+			return nil, state.ErrReadOnlyCipher
+		}
+		unique = append(unique, id)
+	}
+	m.bulkCalls = append(m.bulkCalls, fmt.Sprintf("%s:%s", op, strings.Join(unique, ",")))
+	return unique, nil
+}
+
+func (m *mockVaultService) BulkSoftDelete(ctx context.Context, ids []string) error {
+	unique, err := m.prepareMockBulk(ctx, "soft-delete", ids)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for _, id := range unique {
+		ts := now
+		m.ciphers[id].DeletedDate = &ts
+	}
+	if m.localCopyFails {
+		return &state.LocalCopyError{Err: errors.New("disk full")}
+	}
+	return nil
+}
+
+func (m *mockVaultService) BulkMoveFolder(ctx context.Context, ids []string, folderID *string) error {
+	unique, err := m.prepareMockBulk(ctx, "move", ids)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var target *string
+	if folderID != nil && *folderID != "" {
+		v := *folderID
+		target = &v
+	}
+	for _, id := range unique {
+		if target == nil {
+			m.ciphers[id].FolderID = nil
+		} else {
+			v := *target
+			m.ciphers[id].FolderID = &v
+		}
+	}
+	if m.localCopyFails {
+		return &state.LocalCopyError{Err: errors.New("disk full")}
+	}
+	return nil
+}
+
+func (m *mockVaultService) BulkRestore(ctx context.Context, ids []string, targetFolderID *string) error {
+	tag := "restore"
+	if targetFolderID != nil {
+		tag = "restore:" + *targetFolderID
+	}
+	unique, err := m.prepareMockBulk(ctx, tag, ids)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range unique {
+		m.ciphers[id].DeletedDate = nil
+		if targetFolderID != nil {
+			if *targetFolderID == "" {
+				m.ciphers[id].FolderID = nil
+			} else {
+				v := *targetFolderID
+				m.ciphers[id].FolderID = &v
+			}
+		}
+	}
+	if m.localCopyFails {
+		return &state.LocalCopyError{Err: errors.New("disk full")}
+	}
+	return nil
+}
+
+func (m *mockVaultService) BulkHardDelete(ctx context.Context, ids []string) error {
+	unique, err := m.prepareMockBulk(ctx, "hard-delete", ids)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range unique {
+		delete(m.ciphers, id)
+	}
+	if m.localCopyFails {
+		return &state.LocalCopyError{Err: errors.New("disk full")}
+	}
 	return nil
 }
 

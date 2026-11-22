@@ -860,6 +860,7 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 			return core.Style{Width: core.Pt(core.Points(m.ListW.Get())), FlexShrink: 0}
 		},
 		Children: []core.Node{
+			listHeader(cx, m),
 			searchScope(cx, m),
 			trashBar(cx, m),
 			core.List{
@@ -875,8 +876,18 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 						return m.FilteredItems.At(row.Index())
 					}
 					selected := func() bool {
+						if m.BatchSelectMode.Get() {
+							return false
+						}
 						it, ok := itemAt()
 						return ok && m.IsSelected(it.ID)
+					}
+					batchChecked := func() bool {
+						if !m.BatchSelectMode.Get() {
+							return false
+						}
+						it, ok := itemAt()
+						return ok && m.IsBatchSelected(it.ID)
 					}
 					flag := func(pick func(state.CipherSummary) bool) func() bool {
 						return func() bool {
@@ -906,19 +917,59 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 									if selected() {
 										return "flex-row items-center gap-2.5 h-[52px] px-2.5 rounded-[8px] bg-gv-accent"
 									}
+									if batchChecked() {
+										return "flex-row items-center gap-2.5 h-[52px] px-2.5 rounded-[8px] bg-gv-accent-soft"
+									}
 									return "flex-row items-center gap-2.5 h-[52px] px-2.5 rounded-[8px]"
 								},
 								OnPress: func(core.PressEvent) {
-									if it, ok := itemAt(); ok {
-										m.SelectCipher(cx, it.ID)
+									it, ok := itemAt()
+									if !ok {
+										return
 									}
+									if m.BatchSelectMode.Get() {
+										if !m.SummaryReadOnly(it) {
+											m.ToggleBatchItem(it.ID)
+										}
+										return
+									}
+									m.SelectCipher(cx, it.ID)
 								},
 								OnContextMenu: func(ev core.ContextMenuEvent) {
+									if m.BatchSelectMode.Get() {
+										return
+									}
 									if it, ok := itemAt(); ok {
 										rowMenu(cx, m, it.ID, ev.PagePosition)
 									}
 								},
 								Children: []core.Node{
+									core.Show{
+										When: m.BatchSelectMode.Get,
+										Then: func(cx *core.Scope) core.Node {
+											return core.Dynamic(func(cx *core.Scope) core.Node {
+												it, ok := itemAt()
+												if !ok {
+													return core.View{}
+												}
+												return ui.Checkbox{
+													TestID:  "batch-checkbox-" + it.ID,
+													Label:   "Select " + it.Name,
+													Style:   core.Style{FlexShrink: 0},
+													Checked: batchChecked,
+													Disabled: func() bool {
+														cur, ok := itemAt()
+														return !ok || m.BatchBusy.Get() || m.SummaryReadOnly(cur)
+													},
+													OnChange: func(checked bool) {
+														if cur, ok := itemAt(); ok {
+															m.SetBatchItemSelected(cur.ID, checked)
+														}
+													},
+												}
+											})
+										},
+									},
 									core.Dynamic(func(cx *core.Scope) core.Node {
 										it, ok := itemAt()
 										if !ok {
@@ -966,6 +1017,19 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 									core.View{
 										Class: "flex-row items-center gap-1.5",
 										Children: []core.Node{
+											core.Show{
+												When: func() bool {
+													it, ok := itemAt()
+													return ok && m.BatchSelectMode.Get() && m.SummaryReadOnly(it)
+												},
+												Then: func(cx *core.Scope) core.Node {
+													return core.Text{
+														TestID:  "batch-row-readonly",
+														Class:   "text-[10.5px] font-medium text-gv-fg3 px-1.5 py-0.5 rounded bg-gv-fill",
+														Content: "View only",
+													}
+												},
+											},
 											indicator(flag(func(s state.CipherSummary) bool { return s.Reprompt == 1 }), lucide.LockKeyhole, 12, "text-gv-fg3"),
 											indicator(flag(func(s state.CipherSummary) bool { return s.HasTOTP }), lucide.Timer, 12.5, "text-gv-fg3"),
 											indicator(flag(func(s state.CipherSummary) bool { return s.Favorite }), FilledStar, 11.5, "text-gv-star"),
@@ -977,6 +1041,195 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 					}
 				},
 			},
+			batchActionBar(cx, m),
+		},
+	}
+}
+
+func listHeader(cx *core.Scope, m *AppModel) core.Node {
+	return core.View{
+		TestID: "vault-list-header",
+		Class:  "flex-row items-center justify-between gap-2 h-[34px] px-3 border-b border-gv-line-soft",
+		Children: []core.Node{
+			core.Show{
+				When: m.BatchSelectMode.Get,
+				Then: func(cx *core.Scope) core.Node {
+					return core.View{
+						Class: "flex-1 flex-row items-center justify-between gap-1",
+						Children: []core.Node{
+							core.View{
+								Class: "flex-row items-center gap-1",
+								Children: []core.Node{
+									ui.Button{
+										TestID:  "batch-select-all",
+										Text:    "Select All",
+										Variant: ui.ButtonGhost,
+										Size:    ui.SizeSmall,
+										Disabled: func() bool {
+											return m.BatchBusy.Get() || m.BatchSelectableCount() == 0 || m.AllEditableSelected()
+										},
+										OnPress: m.SelectAllBatch,
+									},
+									ui.Button{
+										TestID:  "batch-clear",
+										Text:    "Clear",
+										Variant: ui.ButtonGhost,
+										Size:    ui.SizeSmall,
+										Disabled: func() bool {
+											return m.BatchBusy.Get() || m.BatchSelectedCount() == 0
+										},
+										OnPress: m.ClearBatchSelection,
+									},
+								},
+							},
+							ui.Button{
+								TestID:   "batch-select-toggle",
+								Text:     "Cancel",
+								Variant:  ui.ButtonGhost,
+								Size:     ui.SizeSmall,
+								Disabled: m.BatchBusy.Get,
+								OnPress:  func() { m.ToggleBatchSelectMode(cx) },
+							},
+						},
+					}
+				},
+				Else: func(cx *core.Scope) core.Node {
+					return core.View{
+						Class: "flex-1 flex-row items-center justify-between gap-2",
+						Children: []core.Node{
+							core.Text{
+								TestID: "list-header-count",
+								Class:  "text-[11.5px] font-medium text-gv-fg3 tabular-nums",
+								ContentFunc: func() string {
+									n := m.FilteredItems.Len()
+									return fmt.Sprintf("%d %s", n, batchItemNoun(n))
+								},
+							},
+							ui.Button{
+								TestID:  "batch-select-toggle",
+								Text:    "Select",
+								Variant: ui.ButtonGhost,
+								Size:    ui.SizeSmall,
+								Disabled: func() bool {
+									return m.FilteredItems.Len() == 0
+								},
+								OnPress: func() { m.ToggleBatchSelectMode(cx) },
+							},
+						},
+					}
+				},
+			},
+		},
+	}
+}
+
+func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
+	return core.Show{
+		When: m.BatchSelectMode.Get,
+		Then: func(cx *core.Scope) core.Node {
+			disabled := func() bool {
+				return m.BatchSelectedCount() == 0 || m.BatchBusy.Get() || m.BatchMutationsDisabled()
+			}
+			return core.View{
+				TestID: "batch-action-bar",
+				Class:  "px-3 py-2.5 gap-2 border-t border-gv-line bg-gv-panel",
+				Children: []core.Node{
+					core.View{
+						Class: "flex-row items-center justify-between gap-2",
+						Children: []core.Node{
+							core.Text{
+								TestID: "batch-selected-count",
+								Class:  "text-[12px] font-semibold text-gv-fg tabular-nums",
+								ContentFunc: func() string {
+									return fmt.Sprintf("%d selected", m.BatchSelectedCount())
+								},
+							},
+							core.Show{
+								When: func() bool {
+									return m.BatchMutationsDisabled() || m.BatchHasReadOnlyInView()
+								},
+								Then: func(cx *core.Scope) core.Node {
+									return core.Text{
+										TestID: "batch-status-hint",
+										ClassFunc: func() string {
+											if m.BatchMutationsDisabled() {
+												return "text-[11px] text-gv-warn"
+											}
+											return "text-[11px] text-gv-fg3"
+										},
+										ContentFunc: func() string {
+											switch {
+											case m.LocalOnly.Get():
+												return "Sign in again to edit"
+											case m.SyncState.Get() == SyncOffline:
+												return "Offline · edits disabled"
+											case m.BatchHasReadOnlyInView():
+												return "View-only omitted"
+											default:
+												return ""
+											}
+										},
+									}
+								},
+							},
+						},
+					},
+					core.Dynamic(func(cx *core.Scope) core.Node {
+						if m.IsTrashView() {
+							return core.View{
+								Class: "flex-row flex-wrap items-center gap-2",
+								Children: []core.Node{
+									ui.Button{
+										TestID:   "batch-restore-btn",
+										Text:     "Restore…",
+										Variant:  ui.ButtonPrimary,
+										Size:     ui.SizeSmall,
+										Flex:     1,
+										Busy:     m.BatchBusy.Get,
+										Disabled: disabled,
+										OnPress:  m.OpenBatchRestoreDialog,
+									},
+									ui.Button{
+										TestID:   "batch-hard-delete-btn",
+										Text:     "Delete Permanently",
+										Variant:  ui.ButtonSecondary,
+										Size:     ui.SizeSmall,
+										Color:    func() core.Color { return themeColor(cx, "gv-danger") },
+										Busy:     m.BatchBusy.Get,
+										Disabled: disabled,
+										OnPress:  func() { m.ConfirmBatchHardDelete(cx) },
+									},
+								},
+							}
+						}
+						return core.View{
+							Class: "flex-row flex-wrap items-center gap-2",
+							Children: []core.Node{
+								ui.Button{
+									TestID:   "batch-move-folder-btn",
+									Text:     "Move to Folder…",
+									Variant:  ui.ButtonSecondary,
+									Size:     ui.SizeSmall,
+									Flex:     1,
+									Busy:     m.BatchBusy.Get,
+									Disabled: disabled,
+									OnPress:  m.OpenBatchMoveDialog,
+								},
+								ui.Button{
+									TestID:   "batch-trash-btn",
+									Text:     "Move to Trash",
+									Variant:  ui.ButtonSecondary,
+									Size:     ui.SizeSmall,
+									Color:    func() core.Color { return themeColor(cx, "gv-danger") },
+									Busy:     m.BatchBusy.Get,
+									Disabled: disabled,
+									OnPress:  func() { m.ConfirmBatchSoftDelete(cx) },
+								},
+							},
+						}
+					}),
+				},
+			}
 		},
 	}
 }

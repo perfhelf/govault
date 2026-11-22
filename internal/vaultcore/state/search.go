@@ -10,7 +10,7 @@ type scoredSummary struct {
 	score   int
 }
 
-func searchCiphers(ciphers map[string]*Cipher, query string, filter SearchFilter) []CipherSummary {
+func searchCiphers(ciphers map[string]*Cipher, query string, filter SearchFilter, isReadOnly func(*Cipher) bool) []CipherSummary {
 	q := strings.ToLower(strings.TrimSpace(query))
 	var matches []scoredSummary
 
@@ -19,6 +19,9 @@ func searchCiphers(ciphers map[string]*Cipher, query string, filter SearchFilter
 			continue
 		}
 		summary := summarizeCipher(c)
+		if isReadOnly != nil {
+			summary.ReadOnly = isReadOnly(c)
+		}
 		if q == "" {
 			matches = append(matches, scoredSummary{summary: summary, score: 0})
 			continue
