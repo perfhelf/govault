@@ -9,6 +9,7 @@ import (
 	"github.com/nsgo-dev/nsgo/nsgotest"
 	"github.com/txchen/govault/cmd/govault/demo"
 	govaultui "github.com/txchen/govault/cmd/govault/ui"
+	"github.com/txchen/govault/internal/vaultcore/i18n"
 	"github.com/txchen/govault/internal/vaultcore/state"
 )
 
@@ -60,7 +61,7 @@ func TestCheckForUpdatesWhileLoggedOutAndShortcutsKept(t *testing.T) {
 			})
 		}, nsgotest.Environment(core.Environment{OS: core.OSMacOS, Idiom: core.IdiomDesktop}), nsgotest.Size(1100, 720))
 
-		app.ChooseMenu("GoVault", checkForUpdatesLabel)
+		app.ChooseMenu("GoVault", i18n.NewCatalog(i18n.DefaultLocale).T("menu.check_updates"))
 		if checks != 1 {
 			t.Fatalf("status %v: Check for Updates ran %d times", status, checks)
 		}

@@ -24,8 +24,8 @@ func GeneratorView(cx *core.Scope, m *AppModel) core.Node {
 						TestID: "generator-mode-tabs",
 						Equal:  true,
 						Options: []ui.Option[string]{
-							{Value: "password", Label: "Password"},
-							{Value: "passphrase", Label: "Passphrase"},
+							{Value: "password", Label: m.T("field.password")},
+							{Value: "passphrase", Label: m.T("generator.passphrase")},
 						},
 						Value: func() string {
 							if m.Prefs.Get().GeneratorMode == "passphrase" {
@@ -87,13 +87,13 @@ func (m *AppModel) generatorStrength() strength {
 	}
 	switch {
 	case bits < 45:
-		return strength{bits, "Weak", 1}
+		return strength{bits, m.T("generator.strength.weak"), 1}
 	case bits < 64:
-		return strength{bits, "Fair", 2}
+		return strength{bits, m.T("generator.strength.fair"), 2}
 	case bits < 90:
-		return strength{bits, "Strong", 3}
+		return strength{bits, m.T("generator.strength.strong"), 3}
 	default:
-		return strength{bits, "Very Strong", 4}
+		return strength{bits, m.T("generator.strength.very_strong"), 4}
 	}
 }
 
@@ -149,7 +149,7 @@ func generatorOutput(cx *core.Scope, m *AppModel) core.Node {
 							core.Text{
 								Class: "text-[11.5px] text-gv-fg3 tabular-nums",
 								ContentFunc: func() string {
-									return fmt.Sprintf("≈ %d bits of entropy", int(math.Round(m.generatorStrength().bits)))
+									return m.Tf("generator.entropy_bits", int(math.Round(m.generatorStrength().bits)))
 								},
 							},
 						},
@@ -161,7 +161,7 @@ func generatorOutput(cx *core.Scope, m *AppModel) core.Node {
 				Children: []core.Node{
 					ui.Button{
 						TestID:  "generator-regenerate",
-						Text:    "Regenerate",
+						Text:    m.T("generator.regenerate"),
 						Icon:    lucide.RefreshCw,
 						Variant: ui.ButtonSecondary,
 						Flex:    1,
@@ -169,11 +169,11 @@ func generatorOutput(cx *core.Scope, m *AppModel) core.Node {
 					},
 					ui.Button{
 						TestID:  "generator-copy",
-						Text:    "Copy",
+						Text:    m.T("common.copy"),
 						Icon:    lucide.Copy,
 						Variant: ui.ButtonPrimary,
 						Flex:    1,
-						OnPress: func() { m.CopySecretValue("Generated secret", m.GenResult.Get()) },
+						OnPress: func() { m.CopySecretValue(m.T("generator.generated_secret"), m.GenResult.Get()) },
 					},
 				},
 			},
@@ -199,7 +199,7 @@ func sliderRow(title string, value func() int, lo, hi int, onChange func(int)) c
 	return core.View{
 		Class: "flex-row items-center gap-4 px-4 py-3 min-h-[50px]",
 		Children: []core.Node{
-			core.Text{Class: "w-[70px] text-[13px] text-gv-fg", Content: title},
+			core.Text{Class: "w-[84px] text-[13px] text-gv-fg", Content: title},
 			ui.Slider{
 				Label: title,
 				Min:   float64(lo),
@@ -241,14 +241,14 @@ func passwordOptionsView(m *AppModel) core.Node {
 	return core.View{
 		Class: "gap-4",
 		Children: []core.Node{
-			card(sliderRow("Length", func() int { return m.Prefs.Get().PasswordOpts.Length }, 8, 128, func(n int) {
+			card(sliderRow(m.T("generator.length"), func() int { return m.Prefs.Get().PasswordOpts.Length }, 8, 128, func(n int) {
 				m.UpdatePrefs(func(p UserPrefs) UserPrefs { p.PasswordOpts.Length = n; return p })
 				m.RegenerateSecret()
 			})),
-			section("Characters", card(
-				toggle("generator-upper", "Uppercase", "A–Z", func(p UserPrefs) bool { return p.PasswordOpts.Uppercase }, func(p *UserPrefs, v bool) { p.PasswordOpts.Uppercase = v }),
-				toggle("generator-lower", "Lowercase", "a–z", func(p UserPrefs) bool { return p.PasswordOpts.Lowercase }, func(p *UserPrefs, v bool) { p.PasswordOpts.Lowercase = v }),
-				toggle("generator-numbers", "Numbers", "0–9", func(p UserPrefs) bool { return p.PasswordOpts.Numbers }, func(p *UserPrefs, v bool) {
+			section(m.T("generator.characters"), card(
+				toggle("generator-upper", m.T("generator.uppercase"), "A–Z", func(p UserPrefs) bool { return p.PasswordOpts.Uppercase }, func(p *UserPrefs, v bool) { p.PasswordOpts.Uppercase = v }),
+				toggle("generator-lower", m.T("generator.lowercase"), "a–z", func(p UserPrefs) bool { return p.PasswordOpts.Lowercase }, func(p *UserPrefs, v bool) { p.PasswordOpts.Lowercase = v }),
+				toggle("generator-numbers", m.T("generator.numbers"), "0–9", func(p UserPrefs) bool { return p.PasswordOpts.Numbers }, func(p *UserPrefs, v bool) {
 					p.PasswordOpts.Numbers = v
 					if !v {
 						p.PasswordOpts.MinNumbers = 0
@@ -256,7 +256,7 @@ func passwordOptionsView(m *AppModel) core.Node {
 						p.PasswordOpts.MinNumbers = 1
 					}
 				}),
-				toggle("generator-special", "Symbols", "! @ # $ % ^ & *", func(p UserPrefs) bool { return p.PasswordOpts.Special }, func(p *UserPrefs, v bool) {
+				toggle("generator-special", m.T("generator.symbols"), "! @ # $ % ^ & *", func(p UserPrefs) bool { return p.PasswordOpts.Special }, func(p *UserPrefs, v bool) {
 					p.PasswordOpts.Special = v
 					if !v {
 						p.PasswordOpts.MinSpecial = 0
@@ -264,7 +264,7 @@ func passwordOptionsView(m *AppModel) core.Node {
 						p.PasswordOpts.MinSpecial = 1
 					}
 				}),
-				toggle("generator-ambiguous", "Avoid ambiguous characters", "Excludes l, 1, I, O and 0", func(p UserPrefs) bool { return p.PasswordOpts.AvoidAmbiguous }, func(p *UserPrefs, v bool) { p.PasswordOpts.AvoidAmbiguous = v }),
+				toggle("generator-ambiguous", m.T("generator.avoid_ambiguous"), m.T("generator.avoid_ambiguous_desc"), func(p UserPrefs) bool { return p.PasswordOpts.AvoidAmbiguous }, func(p *UserPrefs, v bool) { p.PasswordOpts.AvoidAmbiguous = v }),
 			)),
 		},
 	}
@@ -284,12 +284,12 @@ func passphraseOptionsView(m *AppModel) core.Node {
 	return core.View{
 		Class: "gap-4",
 		Children: []core.Node{
-			card(sliderRow("Words", func() int { return m.Prefs.Get().PassphraseOpts.NumWords }, 3, 12, func(n int) {
+			card(sliderRow(m.T("generator.words"), func() int { return m.Prefs.Get().PassphraseOpts.NumWords }, 3, 12, func(n int) {
 				m.UpdatePrefs(func(p UserPrefs) UserPrefs { p.PassphraseOpts.NumWords = n; return p })
 				m.RegenerateSecret()
 			})),
-			section("Options", card(
-				optionRow("Word separator", "Placed between each word", sizedInput(base.Input{
+			section(m.T("generator.options"), card(
+				optionRow(m.T("generator.word_separator"), m.T("generator.word_separator_desc"), sizedInput(base.Input{
 					TestID:      "generator-separator",
 					Placeholder: "-",
 					Value:       func() string { return m.Prefs.Get().PassphraseOpts.Separator },
@@ -299,8 +299,8 @@ func passphraseOptionsView(m *AppModel) core.Node {
 					},
 					Style: core.Style{Width: core.Pt(64), TextAlign: core.TextAlignCenter},
 				}, 28)),
-				toggle("Capitalize words", "Correct-Horse-Battery", func(p UserPrefs) bool { return p.PassphraseOpts.Capitalize }, func(p *UserPrefs, v bool) { p.PassphraseOpts.Capitalize = v }),
-				toggle("Include a number", "Appends a digit to one word", func(p UserPrefs) bool { return p.PassphraseOpts.IncludeNum }, func(p *UserPrefs, v bool) { p.PassphraseOpts.IncludeNum = v }),
+				toggle(m.T("generator.capitalize_words"), m.T("generator.capitalize_words_desc"), func(p UserPrefs) bool { return p.PassphraseOpts.Capitalize }, func(p *UserPrefs, v bool) { p.PassphraseOpts.Capitalize = v }),
+				toggle(m.T("generator.include_number"), m.T("generator.include_number_desc"), func(p UserPrefs) bool { return p.PassphraseOpts.IncludeNum }, func(p *UserPrefs, v bool) { p.PassphraseOpts.IncludeNum = v }),
 			)),
 		},
 	}

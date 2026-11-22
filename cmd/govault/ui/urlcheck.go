@@ -193,7 +193,7 @@ func (m *AppModel) TrashURLCheckItem(id string) {
 			m.URLCheckBusyID.Set("")
 			var lc *state.LocalCopyError
 			if err != nil && !errors.As(err, &lc) {
-				m.ShowToast(ui.ToastError, "Move to Trash failed", friendlyError(err))
+				m.ShowToast(ui.ToastError, "Move to Trash failed", m.friendlyError(err))
 				return
 			}
 			m.removeURLCheckItem(id)

@@ -18,6 +18,9 @@ func MainWindowView(cx *core.Scope, m *AppModel) core.Node {
 		desktop.SetTitleBar(cx, desktop.TitleBarHidden, titleBarHeight)
 	}
 	m.windowScope = cx
+	if m.forcedLocale != "" {
+		cx.SetLocale(m.forcedLocale)
+	}
 	cx.Cleanup(func() {
 		if m.windowScope == cx {
 			m.windowScope = nil
@@ -30,6 +33,7 @@ func MainWindowView(cx *core.Scope, m *AppModel) core.Node {
 		Class:  "flex-1 bg-gv-canvas",
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
+				_ = m.Locale.Get()
 				switch m.LockState.Get() {
 				case state.StatusUnlocked:
 					return UnlockedShellView(cx, m)
@@ -42,14 +46,44 @@ func MainWindowView(cx *core.Scope, m *AppModel) core.Node {
 					return LoginView(cx, m)
 				}
 			}),
-			whenUnlocked(m, func(*core.Scope) core.Node { return repromptDialog(m) }),
-			whenUnlocked(m, func(cx *core.Scope) core.Node { return backupDialog(cx, m) }),
-			whenUnlocked(m, func(cx *core.Scope) core.Node { return profileExportDialog(cx, m) }),
-			whenUnlocked(m, func(*core.Scope) core.Node { return folderDialog(m) }),
-			whenUnlocked(m, func(*core.Scope) core.Node { return batchFolderDialog(m) }),
+			whenUnlocked(m, func(cx *core.Scope) core.Node {
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					_ = m.Locale.Get()
+					return repromptDialog(m)
+				})
+			}),
+			whenUnlocked(m, func(cx *core.Scope) core.Node {
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					_ = m.Locale.Get()
+					return backupDialog(cx, m)
+				})
+			}),
+			whenUnlocked(m, func(cx *core.Scope) core.Node {
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					_ = m.Locale.Get()
+					return profileExportDialog(cx, m)
+				})
+			}),
+			whenUnlocked(m, func(cx *core.Scope) core.Node {
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					_ = m.Locale.Get()
+					return folderDialog(m)
+				})
+			}),
+			whenUnlocked(m, func(cx *core.Scope) core.Node {
+				return core.Dynamic(func(cx *core.Scope) core.Node {
+					_ = m.Locale.Get()
+					return batchFolderDialog(m)
+				})
+			}),
 			core.Show{
 				When: m.showingSignInScreen,
-				Then: func(cx *core.Scope) core.Node { return profileImportDialog(m) },
+				Then: func(cx *core.Scope) core.Node {
+					return core.Dynamic(func(cx *core.Scope) core.Node {
+						_ = m.Locale.Get()
+						return profileImportDialog(m)
+					})
+				},
 			},
 			ui.Toasts{
 				Toaster:   m.Toaster,
@@ -105,8 +139,8 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 		if c == nil || c.Login == nil || c.Login.Password == "" || m.PasswordHidden(c) {
 			return
 		}
-		m.GateReprompt(cx, c, "copy password", func() {
-			m.CopySecretValue("Password", c.Login.Password)
+		m.GateReprompt(cx, c, m.T("reprompt.action.copy_password"), func() {
+			m.CopySecretValue(m.T("field.password"), c.Login.Password)
 		})
 	})
 	cx.OnKeyWith("mod+shift+u", core.KeyOptions{When: core.KeyAlways}, func() {
@@ -115,7 +149,7 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 		}
 		c := m.ActiveCipher.Get()
 		if c != nil && c.Login != nil && c.Login.Username != "" {
-			m.CopyPlainValue("Username", c.Login.Username)
+			m.CopyPlainValue(m.T("field.username"), c.Login.Username)
 		}
 	})
 	cx.OnKeyWith("mod+shift+t", core.KeyOptions{When: core.KeyAlways}, func() {
@@ -126,9 +160,9 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 		if c == nil || c.Login == nil || strings.TrimSpace(c.Login.TOTP) == "" {
 			return
 		}
-		m.GateReprompt(cx, c, "copy TOTP code", func() {
+		m.GateReprompt(cx, c, m.T("reprompt.action.copy_totp"), func() {
 			if code := m.TOTPCode.Get(); code != "" {
-				m.CopySecretValue("TOTP code", code)
+				m.CopySecretValue(m.T("field.totp_code"), code)
 			}
 		})
 	})
@@ -177,19 +211,19 @@ func repromptDialog(m *AppModel) core.Node {
 			}
 		},
 		OnConfirm: m.SubmitReprompt,
-		Title:     "Master Password Verification",
+		Title:     m.T("reprompt.title"),
 		DescriptionFunc: func() string {
 			act := m.Reprompt.Get().Action
 			if act == "" {
-				return "Enter your master password to continue."
+				return m.T("reprompt.desc_default")
 			}
-			return "Enter your master password to " + act + "."
+			return m.Tf("reprompt.desc_action", act)
 		},
 		Children: []core.Node{
 			ui.Input{
 				TestID:        "reprompt-password",
 				OnBlur:        settleSecureInput,
-				Placeholder:   "Master Password",
+				Placeholder:   m.T("common.master_password"),
 				Masked:        true,
 				AutoFocus:     true,
 				NoAutoCorrect: true,
@@ -209,13 +243,13 @@ func repromptDialog(m *AppModel) core.Node {
 		},
 		Footer: []core.Node{
 			ui.Button{
-				Text:    "Cancel",
+				Text:    m.T("common.cancel"),
 				Variant: ui.ButtonSecondary,
 				OnPress: m.CloseReprompt,
 			},
 			ui.Button{
 				TestID:  "reprompt-confirm",
-				Text:    "Verify",
+				Text:    m.T("common.verify"),
 				Variant: ui.ButtonPrimary,
 				Busy:    m.RepromptBusy.Get,
 				OnPress: m.SubmitReprompt,
@@ -249,22 +283,22 @@ func backupDialog(cx *core.Scope, m *AppModel) core.Node {
 		OnConfirm: func() { m.ConfirmBackupDialog(cx) },
 		TitleFunc: func() string {
 			if m.BackupDialog.Get() == BackupImport {
-				return "Backup Password"
+				return m.T("backup.dialog.import_title")
 			}
-			return "Protect Your Backup"
+			return m.T("backup.dialog.export_title")
 		},
 		DescriptionFunc: func() string {
 			if m.BackupDialog.Get() == BackupImport {
-				return "Enter the password this backup was exported with."
+				return m.T("backup.dialog.import_desc")
 			}
-			return "Choose a password for the encrypted backup. It cannot be recovered if you forget it."
+			return m.T("backup.dialog.export_desc")
 		},
 		Children: []core.Node{
-			input("backup-password", "Backup password", m.BackupPW, true),
+			input("backup-password", m.T("backup.dialog.password_placeholder"), m.BackupPW, true),
 			core.Show{
 				When: func() bool { return m.BackupDialog.Get() == BackupExport },
 				Then: func(cx *core.Scope) core.Node {
-					return input("backup-password-confirm", "Confirm password", m.BackupPW2, false)
+					return input("backup-password-confirm", m.T("backup.dialog.confirm_placeholder"), m.BackupPW2, false)
 				},
 			},
 			core.Show{
@@ -275,11 +309,11 @@ func backupDialog(cx *core.Scope, m *AppModel) core.Node {
 			},
 		},
 		Footer: []core.Node{
-			ui.Button{Text: "Cancel", Variant: ui.ButtonSecondary, OnPress: m.CloseBackupDialog},
+			ui.Button{Text: m.T("common.cancel"), Variant: ui.ButtonSecondary, OnPress: m.CloseBackupDialog},
 			core.Dynamic(func(cx *core.Scope) core.Node {
-				text := "Export"
+				text := m.T("backup.dialog.export_btn")
 				if m.BackupDialog.Get() == BackupImport {
-					text = "Decrypt"
+					text = m.T("backup.dialog.decrypt_btn")
 				}
 				return ui.Button{
 					TestID:  "backup-confirm",
@@ -306,14 +340,14 @@ func folderDialog(m *AppModel) core.Node {
 		OnConfirm: m.SaveFolderModal,
 		TitleFunc: func() string {
 			if m.FolderDialog.Get().FolderID == "" {
-				return "New Folder"
+				return m.T("folder.new_title")
 			}
-			return "Rename Folder"
+			return m.T("folder.rename_title")
 		},
 		Children: []core.Node{
 			ui.Input{
 				TestID:      "folder-name-input",
-				Placeholder: "Folder name",
+				Placeholder: m.T("folder.name_placeholder"),
 				AutoFocus:   true,
 				Value:       func() string { return m.FolderDialog.Get().Name },
 				OnChange: func(v string) {
@@ -335,7 +369,7 @@ func folderDialog(m *AppModel) core.Node {
 		},
 		Footer: []core.Node{
 			ui.Button{
-				Text:    "Cancel",
+				Text:    m.T("common.cancel"),
 				Variant: ui.ButtonSecondary,
 				OnPress: func() {
 					m.FolderError.Set("")
@@ -344,7 +378,7 @@ func folderDialog(m *AppModel) core.Node {
 			},
 			ui.Button{
 				TestID:  "folder-save-btn",
-				Text:    "Save",
+				Text:    m.T("common.save"),
 				Variant: ui.ButtonPrimary,
 				Busy:    m.FolderBusy.Get,
 				OnPress: m.SaveFolderModal,

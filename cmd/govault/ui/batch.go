@@ -455,7 +455,7 @@ func (m *AppModel) runBatchMutation(
 			localCopyFailed := errors.As(err, &lc)
 			if err != nil && !localCopyFailed {
 				m.RefreshVaultData()
-				m.ShowToast(ui.ToastError, failTitle, friendlyError(err))
+				m.ShowToast(ui.ToastError, failTitle, m.friendlyError(err))
 				return
 			}
 			if clearActiveIfAffected && slices.Contains(ids, m.SelectedID.Get()) {

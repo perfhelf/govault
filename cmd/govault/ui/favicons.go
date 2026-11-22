@@ -477,12 +477,12 @@ func (m *AppModel) SetShowFavicons(on bool) {
 func (m *AppModel) ClearIconCache() {
 	if f := m.Hooks.Favicons; f != nil {
 		if err := f.Clear(); err != nil {
-			m.ShowToast(ui.ToastError, "Could not clear icon cache", err.Error())
+			m.ShowToast(ui.ToastError, m.T("favicons.toast.clear_failed"), err.Error())
 			return
 		}
 	}
 	m.iconEpoch.Update(func(v int) int { return v + 1 })
-	m.ShowToast(ui.ToastSuccess, "Icon cache cleared", "")
+	m.ShowToast(ui.ToastSuccess, m.T("favicons.toast.cleared"), "")
 }
 
 func (m *AppModel) resetFaviconMemory() {

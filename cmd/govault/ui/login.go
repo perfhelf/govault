@@ -27,10 +27,10 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 			Class: "items-center gap-2.5 pb-1",
 			Children: []core.Node{
 				brandEmblem(56),
-				core.Text{Class: "mt-1.5 text-[19px] font-semibold text-gv-fg", Content: "Sign in to GoVault"},
+				core.Text{Class: "mt-1.5 text-[19px] font-semibold text-gv-fg", Content: m.T("login.title")},
 				core.Text{
 					Class:   "text-[12.5px] text-gv-fg2 text-center",
-					Content: "Connect to your Bitwarden or Vaultwarden server.",
+					Content: m.T("login.subtitle"),
 				},
 			},
 		},
@@ -92,7 +92,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 		core.View{
 			Class: "gap-3.5",
 			Children: []core.Node{
-				formField("Server URL", authInput(base.Input{
+				formField(m.T("login.server_url"), authInput(base.Input{
 					TestID:        "login-server",
 					Placeholder:   "https://vault.example.com",
 					NoAutoCorrect: true,
@@ -100,7 +100,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 					OnChange:      m.LoginServer.Set,
 					Disabled:      func() bool { return m.LoginBusy.Get() || (m.CanReturnToUnlock() && m.ReSignInServer.Get() != "") },
 				})),
-				formField("Email", authInput(base.Input{
+				formField(m.T("login.email"), authInput(base.Input{
 					TestID:        "login-email",
 					Placeholder:   "name@example.com",
 					NoAutoCorrect: true,
@@ -123,7 +123,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 									OnChange:      m.LoginClientID.Set,
 									Disabled:      m.LoginBusy.Get,
 								})),
-								formField("Client Secret", passwordField(cx, base.Input{
+								formField("Client Secret", passwordField(cx, m, base.Input{
 									TestID:        "login-client-secret",
 									Placeholder:   "API client secret",
 									NoAutoCorrect: true,
@@ -135,10 +135,10 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 						}
 					},
 				},
-				formField("Master Password", passwordField(cx, base.Input{
+				formField(m.T("common.master_password"), passwordField(cx, m, base.Input{
 					TestID:        "login-password",
 					Ref:           &m.LoginPasswordRef,
-					Placeholder:   "Required",
+					Placeholder:   m.T("common.required"),
 					NoAutoCorrect: true,
 					Value:         m.LoginPassword.Get,
 					OnChange:      m.LoginPassword.Set,
@@ -167,7 +167,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 						if apiKeyMode() {
 							return "This server does not use HTTPS. Your API secret and vault data are sent unencrypted; use it only on a network you trust."
 						}
-						return "This server does not use HTTPS. Your master password and vault data are sent unencrypted; use it only on a network you trust."
+						return m.T("login.insecure_warning")
 					},
 				}
 			},
@@ -178,7 +178,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 		},
 		ui.Button{
 			TestID:  "login-submit",
-			Text:    "Sign In",
+			Text:    m.T("login.sign_in"),
 			Variant: ui.ButtonPrimary,
 			Size:    ui.SizeLarge,
 			Busy:    m.LoginBusy.Get,
@@ -190,7 +190,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 			Then: func(cx *core.Scope) core.Node {
 				return ui.Button{
 					TestID:  "login-back-to-unlock",
-					Text:    "Back to Unlock",
+					Text:    m.T("login.back_to_unlock"),
 					Variant: ui.ButtonGhost,
 					Size:    ui.SizeLarge,
 					Style:   core.Style{Width: core.Pct(100)},
@@ -198,45 +198,52 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 				}
 			},
 		},
-	}, "End-to-end encrypted. Your master password never leaves this device.")
+	}, m.T("login.footnote"), languageSelect(cx, m, "login-language", 148))
 }
 
-func authScreen(testID string, body []core.Node, footnote string) core.Node {
-	return core.View{
-		TestID: testID,
-		Class:  "flex-1 bg-gv-canvas",
-		Children: []core.Node{
-			core.View{Style: core.Style{Height: core.Pt(titleBarHeight)}, Desktop: dragRegion()},
-			core.Scroll{
-				Class: "flex-1",
-				Children: []core.Node{
-					core.View{
-						Class: "items-center justify-center px-8 pb-[52px] pt-2 gap-5",
-						Style: core.Style{MinHeight: core.Pct(100)},
-						Children: []core.Node{
-							core.View{
-								Class: "w-[380px] px-8 pt-8 pb-7 gap-5 rounded-[16px] bg-gv-card border border-gv-line",
-								Style: core.Style{
-									BorderCurve: core.BorderCurveContinuous,
-									Shadows: []core.BoxShadow{
-										ui.Shadow(0, 1, 3, 0, core.RGBA(0x000000, 0.05)),
-										ui.Shadow(0, 18, 40, -16, core.RGBA(0x000000, 0.22)),
-									},
+func authScreen(testID string, body []core.Node, footnote string, topExtra ...core.Node) core.Node {
+	children := []core.Node{
+		core.View{Style: core.Style{Height: core.Pt(titleBarHeight)}, Desktop: dragRegion()},
+		core.Scroll{
+			Class: "flex-1",
+			Children: []core.Node{
+				core.View{
+					Class: "items-center justify-center px-8 pb-[52px] pt-2 gap-5",
+					Style: core.Style{MinHeight: core.Pct(100)},
+					Children: []core.Node{
+						core.View{
+							Class: "w-[380px] px-8 pt-8 pb-7 gap-5 rounded-[16px] bg-gv-card border border-gv-line",
+							Style: core.Style{
+								BorderCurve: core.BorderCurveContinuous,
+								Shadows: []core.BoxShadow{
+									ui.Shadow(0, 1, 3, 0, core.RGBA(0x000000, 0.05)),
+									ui.Shadow(0, 18, 40, -16, core.RGBA(0x000000, 0.22)),
 								},
-								Children: body,
 							},
-							core.View{
-								Class: "flex-row items-center gap-1.5",
-								Children: []core.Node{
-									icon(lucide.LockKeyhole(), 11, "text-gv-fg3"),
-									core.Text{Class: "text-[11.5px] text-gv-fg3", Content: footnote},
-								},
+							Children: body,
+						},
+						core.View{
+							Class: "flex-row items-center gap-1.5",
+							Children: []core.Node{
+								icon(lucide.LockKeyhole(), 11, "text-gv-fg3"),
+								core.Text{Class: "text-[11.5px] text-gv-fg3", Content: footnote},
 							},
 						},
 					},
 				},
 			},
 		},
+	}
+	if len(topExtra) > 0 {
+		children = append(children, core.View{
+			Class:    "absolute top-[56px] end-5 z-10",
+			Children: topExtra,
+		})
+	}
+	return core.View{
+		TestID:   testID,
+		Class:    "relative flex-1 bg-gv-canvas",
+		Children: children,
 	}
 }
 
@@ -260,14 +267,14 @@ func sizedInput(in base.Input, height core.Points) ui.Input {
 func authInput(in base.Input) core.Node { return sizedInput(in, authFieldHeight) }
 
 // passwordField is a masked input with a reveal toggle and optional trailing controls inside its rim.
-func passwordField(cx *core.Scope, in base.Input, height core.Points, show *core.Signal[bool], toggleTestID string, trailing ...core.Node) core.Node {
+func passwordField(cx *core.Scope, m *AppModel, in base.Input, height core.Points, show *core.Signal[bool], toggleTestID string, trailing ...core.Node) core.Node {
 	inset := core.Points(34 + 28*len(trailing))
 	controls := []core.Node{
 		ui.Button{
 			TestID:   toggleTestID,
 			Variant:  ui.ButtonGhost,
 			Icon:     func() *core.SVG { return eyeIcon(show.Get()) },
-			Label:    "Toggle password visibility",
+			Label:    m.T("common.toggle_password_visibility"),
 			Side:     height - 8,
 			IconSize: 14,
 			Tint:     func() core.Color { return themeColor(cx, "gv-fg3") },
@@ -280,6 +287,7 @@ func passwordField(cx *core.Scope, in base.Input, height core.Points, show *core
 		Class: "relative",
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
+				_ = m.Locale.Get()
 				field := in
 				field.Masked = !show.Get()
 				field.OnBlur = settleSecureInput
@@ -287,7 +295,7 @@ func passwordField(cx *core.Scope, in base.Input, height core.Points, show *core
 				return sizedInput(field, height)
 			}),
 			core.View{
-				Class:    "absolute right-1 top-0 bottom-0 flex-row items-center gap-0.5",
+				Class:    "absolute end-1 top-0 bottom-0 flex-row items-center gap-0.5",
 				Children: controls,
 			},
 		},

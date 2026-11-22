@@ -11,6 +11,7 @@ import (
 	"github.com/nsgo-dev/nsgo/desktop"
 	"github.com/nsgo-dev/nsgo/updater"
 	govaultui "github.com/txchen/govault/cmd/govault/ui"
+	"github.com/txchen/govault/internal/vaultcore/i18n"
 	"github.com/txchen/govault/internal/vaultcore/state"
 	"github.com/txchen/govault/internal/vaultcore/store"
 )
@@ -155,6 +156,7 @@ func (s *DesktopShell) platformHooks(secrets store.SecretStore) govaultui.Platfo
 		SleepLockSupported: sleepLockSupported,
 		Favicons:           s.favicons,
 		ChooseSavePath:     chooseSavePath,
+		DetectSystemLocale: i18n.DetectSystemLocale,
 	}
 	if s.sshAgent != nil {
 		hooks.SSHAgent = s.sshAgent
@@ -167,7 +169,10 @@ func (s *DesktopShell) finishSetup() {
 	shell := s
 	clip := s.clipboard
 
-	desktop.SetApplicationMenu(app, applicationMenu(runtime.GOOS, func() { updater.Check(app) }))
+	app.Effect(func() {
+		shell.model.Locale.Get()
+		desktop.SetApplicationMenu(app, applicationMenuLocalized(runtime.GOOS, shell.model.T, func() { updater.Check(app) }))
+	})
 
 	p := shell.model.Prefs.Get()
 	if runtime.GOOS == "darwin" && p.HideDockIcon && p.ShowTrayIcon {
@@ -232,24 +237,24 @@ func (s *DesktopShell) trayMenu() []desktop.MenuItem {
 	unlocked := s.model.LockState.Get() == state.StatusUnlocked
 	offline := s.model.SyncState.Get() == govaultui.SyncOffline
 	items := []desktop.MenuItem{
-		{Label: "Open GoVault", OnSelect: s.OpenMainWindow},
-		{Label: "Check for Updates…", OnSelect: func() { updater.Check(s.scope) }},
+		{Label: s.model.T("tray.open"), OnSelect: s.OpenMainWindow},
+		{Label: s.model.T("menu.check_updates"), OnSelect: func() { updater.Check(s.scope) }},
 		{Separator: true},
 		{
-			Label:    "Sync Now",
+			Label:    s.model.T("tray.sync_now"),
 			Disabled: !unlocked || offline,
 			OnSelect: func() { s.model.SyncNow(false) },
 		},
 	}
 	if unlocked {
 		items = append(items, desktop.MenuItem{
-			Label:    "Lock Now",
+			Label:    s.model.T("tray.lock_now"),
 			OnSelect: s.model.Lock,
 		})
 	}
 	items = append(items,
 		desktop.MenuItem{Separator: true},
-		desktop.MenuItem{Label: "Quit GoVault", OnSelect: s.scope.Quit},
+		desktop.MenuItem{Label: s.model.T("tray.quit"), OnSelect: s.scope.Quit},
 	)
 	return items
 }

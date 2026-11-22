@@ -1,8 +1,9 @@
 package main
 
-import "github.com/nsgo-dev/nsgo/desktop"
-
-const checkForUpdatesLabel = "Check for Updates…"
+import (
+	"github.com/nsgo-dev/nsgo/desktop"
+	"github.com/txchen/govault/internal/vaultcore/i18n"
+)
 
 // applicationMenu is the menu bar for goos. Check for Updates does not depend
 // on the vault, so it works while logged out or locked and without the
@@ -14,7 +15,14 @@ const checkForUpdatesLabel = "Check for Updates…"
 // window draws the menu bar itself; it stays hidden until Alt (see
 // OpenMainWindow), so it only offers the app items.
 func applicationMenu(goos string, checkUpdates func()) []desktop.MenuItem {
-	update := desktop.MenuItem{Label: checkForUpdatesLabel, OnSelect: checkUpdates}
+	return applicationMenuLocalized(goos, nil, checkUpdates)
+}
+
+func applicationMenuLocalized(goos string, tr func(string) string, checkUpdates func()) []desktop.MenuItem {
+	if tr == nil {
+		tr = i18n.NewCatalog(i18n.DefaultLocale).T
+	}
+	update := desktop.MenuItem{Label: tr("menu.check_updates"), OnSelect: checkUpdates}
 	if goos != "darwin" {
 		return []desktop.MenuItem{{Label: "GoVault", Items: []desktop.MenuItem{
 			update,
@@ -34,7 +42,7 @@ func applicationMenu(goos string, checkUpdates func()) []desktop.MenuItem {
 			{Separator: true},
 			{Role: desktop.MenuQuit},
 		}},
-		{Label: "Edit", Items: []desktop.MenuItem{
+		{Label: tr("menu.edit"), Items: []desktop.MenuItem{
 			{Role: desktop.MenuUndo},
 			{Role: desktop.MenuRedo},
 			{Separator: true},
@@ -43,7 +51,7 @@ func applicationMenu(goos string, checkUpdates func()) []desktop.MenuItem {
 			{Role: desktop.MenuPaste},
 			{Role: desktop.MenuSelectAll},
 		}},
-		{Label: "Window", Role: desktop.MenuWindowMenu, Items: []desktop.MenuItem{
+		{Label: tr("menu.window"), Role: desktop.MenuWindowMenu, Items: []desktop.MenuItem{
 			{Role: desktop.MenuMinimize},
 			{Role: desktop.MenuZoom},
 			{Separator: true},

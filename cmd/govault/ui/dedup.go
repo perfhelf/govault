@@ -309,7 +309,7 @@ func (m *AppModel) executeDedupMerge(selections []dedup.GroupSelection) {
 			case execRes.LocalCopyErr != nil && execRes.FailedGroups == 0:
 				m.ShowLocalCopyWarning(summaryTitle)
 			case execRes.FailedGroups > 0 && execRes.SucceededGroups == 0:
-				m.ShowToast(ui.ToastError, "Merge failed", friendlyError(execRes.Err))
+				m.ShowToast(ui.ToastError, "Merge failed", m.friendlyError(execRes.Err))
 			case execRes.FailedGroups > 0:
 				m.ShowToast(ui.ToastWarning, summaryTitle, fmt.Sprintf("%d group(s) failed; originals kept safe", execRes.FailedGroups))
 			default:
@@ -591,7 +591,7 @@ func dedupResultCard(m *AppModel, res *dedup.ExecuteReport) core.Node {
 		var reasons []string
 		for _, r := range res.Results {
 			if r.Err != nil {
-				reasons = append(reasons, fmt.Sprintf("%s: %s", r.Label, friendlyError(r.Err)))
+				reasons = append(reasons, fmt.Sprintf("%s: %s", r.Label, m.friendlyError(r.Err)))
 			}
 		}
 		if len(reasons) > 0 {

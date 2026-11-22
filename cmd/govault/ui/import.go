@@ -65,7 +65,7 @@ func (m *AppModel) StartExport() {
 	}
 	m.ResetIdleTimer()
 	gen := m.LockGeneration()
-	m.openRepromptDialog("export your vault", func() {
+	m.openRepromptDialog(m.T("reprompt.action.export_vault"), func() {
 		if m.StillUnlocked(gen) {
 			m.openBackupDialog(BackupExport)
 		}
@@ -110,15 +110,15 @@ func (m *AppModel) confirmExport(cx *core.Scope) {
 	pw := m.BackupPW.Get()
 	switch {
 	case len([]rune(pw)) < minBackupPasswordLength:
-		m.BackupError.Set(fmt.Sprintf("Use at least %d characters.", minBackupPasswordLength))
+		m.BackupError.Set(m.Tf("backup.error.min_length", minBackupPasswordLength))
 		return
 	case pw != m.BackupPW2.Get():
-		m.BackupError.Set("The passwords do not match.")
+		m.BackupError.Set(m.T("backup.error.mismatch"))
 		return
 	}
 	backup := m.Core.BackupData()
 	if n := len(backup.Unreadable); n > 0 {
-		m.BackupError.Set(fmt.Sprintf("%d personal item(s) are in a format GoVault cannot read, so the backup would be incomplete. Export from the Bitwarden web vault instead.", n))
+		m.BackupError.Set(m.Tf("backup.error.unreadable_items", n))
 		return
 	}
 	m.ReleaseSecureInput()
@@ -150,7 +150,7 @@ func (m *AppModel) confirmExport(cx *core.Scope) {
 				if err != nil || target.dir == "" || !m.StillUnlocked(gen) {
 					crypto.ZeroBytes(data)
 					if err != nil {
-						m.ShowToast(ui.ToastError, "Export failed", err.Error())
+						m.ShowToast(ui.ToastError, m.T("backup.export_failed"), err.Error())
 					}
 					return
 				}
@@ -159,9 +159,9 @@ func (m *AppModel) confirmExport(cx *core.Scope) {
 					m.Scope.Post(func() {
 						switch {
 						case err != nil:
-							m.ShowToast(ui.ToastError, "Export failed", err.Error())
+							m.ShowToast(ui.ToastError, m.T("backup.export_failed"), err.Error())
 						case published:
-							m.ShowToast(ui.ToastSuccess, "Encrypted backup saved", "Keep the backup password safe; it cannot be recovered.")
+							m.ShowToast(ui.ToastSuccess, m.T("backup.export_saved_title"), m.T("backup.export_saved_desc"))
 						}
 					})
 				}()
@@ -178,9 +178,9 @@ func (m *AppModel) StartImport(cx *core.Scope) {
 	}
 	m.ResetIdleTimer()
 	gen := m.LockGeneration()
-	cx.PickFiles(core.PickFilesOptions{Title: "Import Backup", Button: "Import", Types: []string{".json"}}, func(files []core.File, err error) {
+	cx.PickFiles(core.PickFilesOptions{Title: m.T("import.title_picker"), Button: m.T("import.button_picker"), Types: []string{".json"}}, func(files []core.File, err error) {
 		if err != nil {
-			m.ShowToast(ui.ToastError, "Could not open file", err.Error())
+			m.ShowToast(ui.ToastError, m.T("backup.could_not_open"), err.Error())
 			return
 		}
 		if len(files) == 0 {
@@ -188,14 +188,14 @@ func (m *AppModel) StartImport(cx *core.Scope) {
 		}
 		f := files[0]
 		go func() {
-			data, err := readBackupFile(f)
+			data, err := readBackupFile(m, f)
 			m.Scope.Post(func() {
 				if !m.StillUnlocked(gen) {
 					crypto.ZeroBytes(data)
 					return
 				}
 				if err != nil {
-					m.ShowToast(ui.ToastError, "Import failed", err.Error())
+					m.ShowToast(ui.ToastError, m.T("import.failed"), err.Error())
 					return
 				}
 				m.receiveBackup(f.Name, data)
@@ -204,7 +204,7 @@ func (m *AppModel) StartImport(cx *core.Scope) {
 	})
 }
 
-func readBackupFile(f core.File) ([]byte, error) {
+func readBackupFile(m *AppModel, f core.File) ([]byte, error) {
 	if f.Temporary && f.Path != "" {
 		defer os.Remove(f.Path)
 	}
@@ -220,7 +220,7 @@ func readBackupFile(f core.File) ([]byte, error) {
 	}
 	if len(data) > export.MaxFileSize {
 		crypto.ZeroBytes(data)
-		return nil, fmt.Errorf("the file is larger than %d MiB", export.MaxFileSize>>20)
+		return nil, errors.New(m.Tf("backup.error.file_too_large", export.MaxFileSize>>20))
 	}
 	return data, nil
 }
@@ -229,7 +229,7 @@ func (m *AppModel) receiveBackup(name string, data []byte) {
 	needs, err := export.NeedsPassword(data)
 	if err != nil {
 		crypto.ZeroBytes(data)
-		m.ShowToast(ui.ToastError, "Import failed", backupError(err))
+		m.ShowToast(ui.ToastError, m.T("import.failed"), m.backupErrorText(err))
 		return
 	}
 	if needs {
@@ -240,7 +240,7 @@ func (m *AppModel) receiveBackup(name string, data []byte) {
 	v, err := export.Read(data, nil)
 	crypto.ZeroBytes(data)
 	if err != nil {
-		m.ShowToast(ui.ToastError, "Import failed", backupError(err))
+		m.ShowToast(ui.ToastError, m.T("import.failed"), m.backupErrorText(err))
 		return
 	}
 	m.beginImportReview(name, v)
@@ -250,7 +250,7 @@ func (m *AppModel) confirmImportPassword() {
 	pending := m.importPending
 	pw := m.BackupPW.Get()
 	if pending == nil || pw == "" {
-		m.BackupError.Set("Enter the backup password.")
+		m.BackupError.Set(m.T("backup.error.enter_password"))
 		return
 	}
 	m.ReleaseSecureInput()
@@ -272,27 +272,17 @@ func (m *AppModel) confirmImportPassword() {
 			}
 			m.BackupBusy.Set(false)
 			if errors.Is(err, export.ErrWrongPassword) {
-				m.BackupError.Set("Incorrect backup password.")
+				m.BackupError.Set(m.T("backup.error.wrong_password"))
 				return
 			}
 			m.CloseBackupDialog()
 			if err != nil {
-				m.ShowToast(ui.ToastError, "Import failed", backupError(err))
+				m.ShowToast(ui.ToastError, m.T("import.failed"), m.backupErrorText(err))
 				return
 			}
 			m.beginImportReview(pending.name, v)
 		})
 	}()
-}
-
-func backupError(err error) string {
-	switch {
-	case errors.Is(err, export.ErrNotBitwardenExport):
-		return "This is not a Bitwarden JSON export."
-	case errors.Is(err, export.ErrAccountRestricted):
-		return "This backup is locked to its account. Export it again as a password-protected file."
-	}
-	return friendlyError(err)
 }
 
 func (m *AppModel) beginImportReview(name string, v *export.Vault) {
@@ -325,7 +315,7 @@ func (m *AppModel) SetImportAction(i int, a export.Action) {
 	}
 	if e := &sess.Plan.Entries[i]; a == export.ActionUpdate && e.NeedsReprompt() && slices.Contains(e.Allowed(), a) {
 		gen := m.LockGeneration()
-		m.openRepromptDialog("update a protected item", func() {
+		m.openRepromptDialog(m.T("reprompt.action.update_protected"), func() {
 			if m.StillUnlocked(gen) && m.ImportSession.Get() == sess {
 				m.mutateImport(func(*export.Plan) {
 					e.ApproveReprompt()
@@ -391,31 +381,31 @@ func (m *AppModel) ApplyImport() {
 			m.ImportSession.Set(nil)
 			m.Route.Set(RouteVault)
 			m.RefreshVaultData()
-			title := fmt.Sprintf("Imported: %d created, %d updated", res.Created, res.Updated)
+			title := m.Tf("import.result_title", res.Created, res.Updated)
 			if res.LocalCopyErr != nil && res.Failed == 0 {
 				m.ShowLocalCopyWarning(title)
 				return
 			}
 			if res.Failed > 0 {
-				m.ShowToast(ui.ToastWarning, title, fmt.Sprintf("%d item(s) failed: %s", res.Failed, friendlyError(res.Err)))
+				m.ShowToast(ui.ToastWarning, title, m.Tf("import.result_failed_desc", res.Failed, m.friendlyError(res.Err)))
 				return
 			}
-			m.ShowToast(ui.ToastSuccess, title, fmt.Sprintf("%d skipped", res.Skipped))
+			m.ShowToast(ui.ToastSuccess, title, m.Tf("import.result_skipped_desc", res.Skipped))
 		})
 	}()
 }
 
-func importActionLabel(e *export.Entry, a export.Action) string {
+func importActionLabel(m *AppModel, e *export.Entry, a export.Action) string {
 	switch a {
 	case export.ActionCreate:
 		if e.Class == export.ClassNew {
-			return "Create"
+			return m.T("import.action.create")
 		}
-		return "Create Copy"
+		return m.T("import.action.create_copy")
 	case export.ActionUpdate:
-		return "Update Existing"
+		return m.T("import.action.update")
 	}
-	return "Skip"
+	return m.T("import.action.skip")
 }
 
 func ImportView(cx *core.Scope, m *AppModel) core.Node {
@@ -429,8 +419,8 @@ func ImportView(cx *core.Scope, m *AppModel) core.Node {
 					return core.View{
 						Class: "flex-1 items-center justify-center gap-2",
 						Children: []core.Node{
-							core.Text{Class: "text-[13px] font-semibold text-gv-fg", Content: "No Import in Progress"},
-							core.Text{Class: "text-[12px] text-gv-fg2", Content: "Choose Import Backup in Settings to review a backup."},
+							core.Text{Class: "text-[13px] font-semibold text-gv-fg", Content: m.T("import.empty_title")},
+							core.Text{Class: "text-[12px] text-gv-fg2", Content: m.T("import.empty_desc")},
 						},
 					}
 				}
@@ -458,22 +448,22 @@ func importReview(cx *core.Scope, m *AppModel, sess *ImportSession) core.Node {
 							core.View{
 								Class: "gap-1",
 								Children: []core.Node{
-									core.Text{Class: "text-[17px] font-semibold text-gv-fg", Content: "Review Import"},
+									core.Text{Class: "text-[17px] font-semibold text-gv-fg", Content: m.T("import.review_title")},
 									core.Text{
 										TestID:  "import-summary",
 										Class:   "text-[12.5px] text-gv-fg2",
-										Content: fmt.Sprintf("%s · %d new, %d changed, %d identical. Nothing changes until you apply.", sess.FileName, c.New, c.Conflicts, c.Identical),
+										Content: m.Tf("import.summary", sess.FileName, c.New, c.Conflicts, c.Identical),
 									},
 								},
 							},
 							core.View{
 								Class: "flex-row flex-wrap gap-2",
 								Children: []core.Node{
-									batch("import-all-new", "Select All New", func() { m.BatchImport(export.ClassNew, export.ActionCreate) }),
-									batch("import-skip-conflicts", "Skip All Conflicts", func() { m.BatchImport(export.ClassConflict, export.ActionSkip) }),
-									batch("import-copy-conflicts", "Copy All Conflicts", func() { m.BatchImport(export.ClassConflict, export.ActionCreate) }),
-									batch("import-update-conflicts", "Update All Conflicts", func() { m.BatchImport(export.ClassConflict, export.ActionUpdate) }),
-									batch("import-skip-all", "Skip All", m.SkipAllImport),
+									batch("import-all-new", m.T("import.batch.select_all_new"), func() { m.BatchImport(export.ClassNew, export.ActionCreate) }),
+									batch("import-skip-conflicts", m.T("import.batch.skip_conflicts"), func() { m.BatchImport(export.ClassConflict, export.ActionSkip) }),
+									batch("import-copy-conflicts", m.T("import.batch.copy_conflicts"), func() { m.BatchImport(export.ClassConflict, export.ActionCreate) }),
+									batch("import-update-conflicts", m.T("import.batch.update_conflicts"), func() { m.BatchImport(export.ClassConflict, export.ActionUpdate) }),
+									batch("import-skip-all", m.T("import.batch.skip_all"), m.SkipAllImport),
 								},
 							},
 						}
@@ -485,21 +475,21 @@ func importReview(cx *core.Scope, m *AppModel, sess *ImportSession) core.Node {
 								}
 							}
 							if len(rows) > 0 {
-								blocks = append(blocks, section(fmt.Sprintf("%s (%d)", title, len(rows)), card(rows...)))
+								blocks = append(blocks, section(m.Tf("import.group_title", title, len(rows)), card(rows...)))
 							}
 						}
-						group(export.ClassConflict, "Changed")
-						group(export.ClassNew, "New")
+						group(export.ClassConflict, m.T("import.group.changed"))
+						group(export.ClassNew, m.T("import.group.new"))
 						if c.Identical > 0 {
 							blocks = append(blocks, ui.Button{
 								TestID:  "import-toggle-identical",
-								Text:    identicalToggleLabel(m.ImportShowIdentical.Get(), c.Identical),
+								Text:    identicalToggleLabel(m, m.ImportShowIdentical.Get(), c.Identical),
 								Variant: ui.ButtonGhost,
 								Size:    ui.SizeSmall,
 								OnPress: func() { m.ImportShowIdentical.Set(!m.ImportShowIdentical.Get()) },
 							})
 							if m.ImportShowIdentical.Get() {
-								group(export.ClassIdentical, "Identical")
+								group(export.ClassIdentical, m.T("import.group.identical"))
 							}
 						}
 						return core.View{Class: "w-full max-w-[760px] self-center px-7 pt-6 pb-8 gap-4", Children: blocks}
@@ -511,7 +501,7 @@ func importReview(cx *core.Scope, m *AppModel, sess *ImportSession) core.Node {
 				Children: []core.Node{
 					ui.Button{
 						TestID:   "import-cancel",
-						Text:     "Cancel",
+						Text:     m.T("common.cancel"),
 						Variant:  ui.ButtonSecondary,
 						Disabled: m.ImportBusy.Get,
 						OnPress:  m.CancelImport,
@@ -521,7 +511,7 @@ func importReview(cx *core.Scope, m *AppModel, sess *ImportSession) core.Node {
 						c := sess.Plan.Counts()
 						return ui.Button{
 							TestID:   "import-apply",
-							Text:     fmt.Sprintf("Apply: %d create, %d update, %d skipped", c.Create, c.Update, c.Skip),
+							Text:     m.Tf("import.apply", c.Create, c.Update, c.Skip),
 							Icon:     lucide.Check,
 							Variant:  ui.ButtonPrimary,
 							Busy:     m.ImportBusy.Get,
@@ -539,9 +529,9 @@ func importReview(cx *core.Scope, m *AppModel, sess *ImportSession) core.Node {
 // vault, or an organization and its collections.
 func (m *AppModel) importDestination(c *state.Cipher) string {
 	if c == nil || c.OrganizationID == nil || *c.OrganizationID == "" {
-		return "your personal vault"
+		return m.T("import.dest.personal")
 	}
-	org := "an organization"
+	org := m.T("import.dest.org_fallback")
 	for _, o := range m.Core.Organizations() {
 		if o.ID == *c.OrganizationID {
 			org = o.Name
@@ -554,21 +544,21 @@ func (m *AppModel) importDestination(c *state.Cipher) string {
 		}
 	}
 	if len(cols) == 0 {
-		return "the shared vault of " + org
+		return m.Tf("import.dest.shared_org", org)
 	}
 	return org + " · " + strings.Join(cols, ", ")
 }
 
-func identicalToggleLabel(shown bool, n int) string {
+func identicalToggleLabel(m *AppModel, shown bool, n int) string {
 	if shown {
-		return fmt.Sprintf("Hide %d identical items", n)
+		return m.Tf("import.identical_hide", n)
 	}
-	return fmt.Sprintf("Show %d identical items", n)
+	return m.Tf("import.identical_show", n)
 }
 
 func importRow(m *AppModel, p *export.Plan, i int) core.Node {
 	e := &p.Entries[i]
-	sub := CipherTypeLabel(e.Item.Type)
+	sub := m.CipherTypeLabel(e.Item.Type)
 	if e.Item.Login != nil && e.Item.Login.Username != nil && *e.Item.Login.Username != "" {
 		sub = *e.Item.Login.Username
 	}
@@ -578,28 +568,28 @@ func importRow(m *AppModel, p *export.Plan, i int) core.Node {
 	var note string
 	switch e.Class {
 	case export.ClassConflict:
-		note = "Differs: " + strings.Join(e.Diff, ", ") + " · in " + m.importDestination(e.Match)
+		note = m.Tf("import.note.differs", strings.Join(m.translateImportDiff(e.Diff), ", "), m.importDestination(e.Match))
 		switch {
 		case e.UpdateBlocked != "":
-			note += " · cannot update: " + e.UpdateBlocked
+			note += " · " + m.Tf("import.note.cannot_update", m.translateImportBlocked(e.UpdateBlocked))
 		case !e.CanUpdate:
-			note += " · existing item is read-only"
+			note += " · " + m.T("import.note.readonly")
 		case e.NeedsReprompt():
-			note += " · protected: Update asks for your master password"
+			note += " · " + m.T("import.note.reprompt")
 		}
 	case export.ClassIdentical:
-		note = "Already in " + m.importDestination(e.Match)
+		note = m.Tf("import.note.already_in", m.importDestination(e.Match))
 	case export.ClassNew:
 		switch {
 		case e.Ambiguous:
-			note = "Several vault items have this name, so it is not matched to any. Choose Create to add it as a new item."
+			note = m.T("import.note.ambiguous")
 		case e.Item.ArchivedDate != nil && !m.Core.CanArchive():
-			note = "Archived in the backup; it is created in your vault, since Archive needs a premium membership."
+			note = m.T("import.note.archived_no_premium")
 		}
 	}
 	opts := make([]ui.Option[export.Action], 0, 3)
 	for _, a := range e.Allowed() {
-		opts = append(opts, ui.Option[export.Action]{Value: a, Label: importActionLabel(e, a)})
+		opts = append(opts, ui.Option[export.Action]{Value: a, Label: importActionLabel(m, e, a)})
 	}
 	texts := []core.Node{
 		core.Text{MaxLines: 1, Class: "text-[13.5px] text-gv-fg", Content: e.Item.Name},
@@ -610,13 +600,13 @@ func importRow(m *AppModel, p *export.Plan, i int) core.Node {
 	}
 	return core.View{
 		TestID: "import-row",
-		Class:  "flex-row items-center gap-3 pl-3.5 pr-3 py-2 min-h-[52px]",
+		Class:  "flex-row items-center gap-3 ps-3.5 pe-3 py-2 min-h-[52px]",
 		Children: []core.Node{
 			itemEmblem(e.Item.Name, e.Item.Type, "", 28),
 			core.View{Class: "flex-1 gap-[2px] overflow-hidden", Children: texts},
 			ui.Select[export.Action]{
 				TestID:  fmt.Sprintf("import-action-%d", i),
-				Style:   core.Style{Width: core.Pt(150)},
+				Style:   core.Style{Width: core.Pt(176)},
 				Options: opts,
 				Value: func() export.Action {
 					m.ImportRev.Get()
