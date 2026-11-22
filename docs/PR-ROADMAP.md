@@ -42,8 +42,8 @@ integration/all
   - `cmd/govault/ui/`: `login.go`, `model.go`, `app_test.go`, `apikey_login_test.go`
   - `cmd/govault/demo/demo.go`
 - **Verified Security & Privacy Invariants:**
-  - Server token exchange uses `client_credentials` (`scope=api offline_access`) and never sends the user's Master Password or PBKDF2/Argon2id auth hash to `/identity/connect/token`.
-  - Master Password remains strictly local: `TokenResponse.KDFConfig()` supplies Argon2id/PBKDF2 parameters (falling back to `/api/accounts/prelogin` when omitted) for local key derivation and verification against synced `Profile.Key`.
+  - Server token exchange uses `client_credentials` (`scope=api`) and never sends the user's Master Password or PBKDF2/Argon2id auth hash to `/identity/connect/token`.
+  - Master Password remains strictly local: `TokenResponse.KDFConfig()` supplies Argon2id/PBKDF2 parameters (falling back to `/identity/accounts/prelogin` when omitted) for local key derivation and verification against synced `Profile.Key`.
   - Client Secret input is concealed and never persisted in plaintext or exposed in error messages.
   - Non-HTTPS server URLs trigger explicit insecure-connection warnings before submission.
 - **Why It Fits `txchen/govault`:** Keeps HTTP protocol details and session token handling inside `internal/vaultcore/api` and `internal/vaultcore/state` (zero GUI/CGO dependencies), preserving the strict separation between `vaultcore` and `cmd/govault/ui`.
@@ -96,7 +96,7 @@ integration/all
   - `cmd/govault/ui/`: `health.go`, `health_test.go`, `model.go`, `nav.go`
 - **Verified Security & Privacy Invariants:**
   - **100% local on-device evaluation:** `internal/vaultcore/health` never performs network requests (no HIBP queries or telemetry) and never writes findings to disk.
-  - Properly excludes trashed and archived items from active hygiene scoring while surfacing undecryptable personal ciphers read-only with clear server remediation instructions.
+  - Properly skips items in Trash (`DeletedDate != nil`) while keeping archived items (`ArchivedDate != nil`) included in active hygiene checks, and surfaces undecryptable personal ciphers read-only with clear server remediation instructions.
 - **Why It Fits `txchen/govault`:** Keeps all security heuristics and scoring arithmetic in pure, unit-tested `internal/vaultcore/health`, enabling fast reactive recalculation on unlock/edit with zero UI-thread stalling.
 
 ---
@@ -136,7 +136,7 @@ integration/all
 ---
 
 ### 7. `pr/i18n`
-- **Commits:** `f96b413145dd4a20a39fe577a667443c80915987` + `1ab4ef0e87094d8be6cb9577a667443c80915987`
+- **Commits:** `f96b413145dd4a20a39fe5711cc6a20bda50b9cd` + `1ab4ef0e87094d8be6cb9577a667443c80915987`
 - **Base:** `master` (`277686dc4ae62e571dd18359720670d9f1f76060`) · **Submission order:** `#7`
 - **Suggested Upstream PR Title:** `feat(govault): add 6-language localization and RTL layout support`
 - **Suggested Upstream PR Description:** Introduces embedded translations for English (`en`), Simplified Chinese (`zh-CN`), French (`fr`), German (`de`), Spanish (`es`), and Arabic (`ar`) with system locale auto-detection, live runtime switching across main window/tray/app menu, and full RTL layout mirroring for Arabic.
