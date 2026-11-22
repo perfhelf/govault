@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/nsgo-dev/nsgo/base"
@@ -129,6 +128,8 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 			m.clearBatchState()
 		} else if m.Route.Get() == RouteURLCheck && m.URLCheckPhase.Get() == URLCheckScanning {
 			m.CancelURLCheck()
+		} else if m.Route.Get() == RouteURLCheck && m.URLCheckSelectedCount() > 0 && !m.BatchFolderDialog.Get().Open && !m.URLCheckBatchBusy.Get() {
+			m.ClearURLCheckSelection()
 		}
 	})
 	cx.OnKeyWith("mod+c", core.KeyOptions{When: core.KeyNotEditing}, func() {
@@ -398,23 +399,36 @@ func batchFolderDialog(m *AppModel) core.Node {
 		},
 		TitleFunc: func() string {
 			if m.BatchFolderDialog.Get().Mode == BatchFolderRestore {
-				return "Restore Items"
+				return m.T("batch.folder.restore_title")
 			}
-			return "Move to Folder"
+			return m.T("batch.folder.move_title")
 		},
 		DescriptionFunc: func() string {
-			n := m.BatchSelectedCount()
-			noun := batchItemNoun(n)
-			if m.BatchFolderDialog.Get().Mode == BatchFolderRestore {
-				return fmt.Sprintf("Restore %d selected %s to their original folders or choose a folder.", n, noun)
+			dlg := m.BatchFolderDialog.Get()
+			if dlg.Mode == BatchFolderURLCheckMove {
+				n := m.URLCheckSelectedCount()
+				if n == 1 {
+					return m.Tf("batch.folder.choose_desc_one", n)
+				}
+				return m.Tf("batch.folder.choose_desc_many", n)
 			}
-			return fmt.Sprintf("Choose a folder for %d selected %s.", n, noun)
+			n := m.BatchSelectedCount()
+			if dlg.Mode == BatchFolderRestore {
+				if n == 1 {
+					return m.Tf("batch.folder.restore_desc_one", n)
+				}
+				return m.Tf("batch.folder.restore_desc_many", n)
+			}
+			if n == 1 {
+				return m.Tf("batch.folder.choose_desc_one", n)
+			}
+			return m.Tf("batch.folder.choose_desc_many", n)
 		},
 		Children: []core.Node{
 			core.Dynamic(func(cx *core.Scope) core.Node {
 				dlg := m.BatchFolderDialog.Get()
 				folders := m.Folders.Get()
-				disabled := func() bool { return m.BatchBusy.Get() || m.BatchMutationsDisabled() }
+				disabled := func() bool { return m.BatchBusy.Get() || m.URLCheckBatchBusy.Get() || m.BatchMutationsDisabled() }
 				optionBtn := func(testID, text string, icon func() *core.SVG, onPress func()) core.Node {
 					return ui.Button{
 						TestID:   testID,
@@ -429,26 +443,32 @@ func batchFolderDialog(m *AppModel) core.Node {
 
 				var rows []core.Node
 				if dlg.Mode == BatchFolderRestore {
-					rows = append(rows, optionBtn("batch-folder-original", "Restore (Original Folders)", lucide.RotateCcw, func() {
+					rows = append(rows, optionBtn("batch-folder-original", m.T("batch.folder.restore_original"), lucide.RotateCcw, func() {
 						m.ExecuteBatchRestore(nil)
 					}))
 				}
-				rows = append(rows, optionBtn("batch-folder-none", "(No Folder)", lucide.Folder, func() {
-					if dlg.Mode == BatchFolderRestore {
+				rows = append(rows, optionBtn("batch-folder-none", m.T("batch.folder.none"), lucide.Folder, func() {
+					switch dlg.Mode {
+					case BatchFolderRestore:
 						empty := ""
 						m.ExecuteBatchRestore(&empty)
-						return
+					case BatchFolderURLCheckMove:
+						m.ExecuteURLCheckBatchMoveFolder(nil)
+					default:
+						m.ExecuteBatchMoveFolder(nil)
 					}
-					m.ExecuteBatchMoveFolder(nil)
 				}))
 				for _, f := range folders {
 					fid := f.ID
 					rows = append(rows, optionBtn("batch-folder-option-"+fid, f.Name, lucide.Folder, func() {
-						if dlg.Mode == BatchFolderRestore {
+						switch dlg.Mode {
+						case BatchFolderRestore:
 							m.ExecuteBatchRestore(&fid)
-							return
+						case BatchFolderURLCheckMove:
+							m.ExecuteURLCheckBatchMoveFolder(&fid)
+						default:
+							m.ExecuteBatchMoveFolder(&fid)
 						}
-						m.ExecuteBatchMoveFolder(&fid)
 					}))
 				}
 				return core.Scroll{
@@ -460,9 +480,9 @@ func batchFolderDialog(m *AppModel) core.Node {
 		Footer: []core.Node{
 			ui.Button{
 				TestID:   "batch-folder-cancel",
-				Text:     "Cancel",
+				Text:     m.T("common.cancel"),
 				Variant:  ui.ButtonSecondary,
-				Disabled: m.BatchBusy.Get,
+				Disabled: func() bool { return m.BatchBusy.Get() || m.URLCheckBatchBusy.Get() },
 				OnPress:  m.CloseBatchFolderDialog,
 			},
 		},

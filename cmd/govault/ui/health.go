@@ -23,20 +23,20 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					return healthTile(m, c, glyph, tint, count, label, filter == c)
 				}
 				blocks := []core.Node{
-					healthScoreCard(r),
+					healthScoreCard(m, r),
 					core.View{
 						TestID: "health-tiles",
 						Class:  "grid grid-cols-2 sm:grid-cols-3 gap-2.5",
 						Children: []core.Node{
 							tile(HealthReused, lucide.Repeat, 0xf08a0a, r.ReusedItems(), m.T("health.tile.reused")),
 							tile(HealthWeak, lucide.ShieldAlert, 0xe5484d, len(r.Weak), m.T("health.tile.weak")),
-							tile(HealthEmpty, lucide.KeyRound, 0xe04f5f, len(r.Empty), "Empty"),
-							tile(HealthStale, lucide.Clock, 0xd97706, len(r.Stale), "Stale (>1y)"),
+							tile(HealthEmpty, lucide.KeyRound, 0xe04f5f, len(r.Empty), m.T("health.tile.empty")),
+							tile(HealthStale, lucide.Clock, 0xd97706, len(r.Stale), m.T("health.tile.stale")),
 							tile(HealthCards, lucide.CalendarClock, 0xa25ddc, len(r.Cards), m.T("health.tile.cards")),
 							tile(HealthUnsecured, lucide.LockOpen, 0x0a84ff, len(r.Unsecured), m.T("health.tile.unsecured")),
-							tile(HealthMissingURI, lucide.Link2Off, 0x14a3b8, len(r.MissingURI), "Missing URI"),
-							tile(HealthMissingName, lucide.Tag, 0x6b7a90, len(r.MissingName), "Missing Title"),
-							tile(HealthUnreadable, lucide.TriangleAlert, 0xd93025, len(r.Unreadable), "Unreadable"),
+							tile(HealthMissingURI, lucide.Link2Off, 0x14a3b8, len(r.MissingURI), m.T("health.tile.missing_uri")),
+							tile(HealthMissingName, lucide.Tag, 0x6b7a90, len(r.MissingName), m.T("health.tile.missing_name")),
+							tile(HealthUnreadable, lucide.TriangleAlert, 0xd93025, len(r.Unreadable), m.T("health.tile.unreadable")),
 						},
 					},
 				}
@@ -57,7 +57,7 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 								Class: "flex-1 gap-[2px]",
 								Children: []core.Node{
 									core.Text{Class: "text-[14px] font-semibold text-gv-fg", Content: m.T("health.all_clear_title")},
-									core.Text{Class: "text-[12px] text-gv-fg2", Content: "No password, card, website, title, or unreadable item issues found."},
+									core.Text{Class: "text-[12px] text-gv-fg2", Content: m.T("health.all_clear_desc")},
 								},
 							},
 						},
@@ -77,10 +77,10 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					blocks = append(blocks, section(m.T("health.section.weak"), healthList(cx, m, r.Weak)))
 				}
 				if len(r.Empty) > 0 && show(HealthEmpty) {
-					blocks = append(blocks, section("Empty Passwords", healthList(cx, m, r.Empty)))
+					blocks = append(blocks, section(m.T("health.section.empty"), healthList(cx, m, r.Empty)))
 				}
 				if len(r.Stale) > 0 && show(HealthStale) {
-					blocks = append(blocks, section("Stale Passwords", healthList(cx, m, r.Stale)))
+					blocks = append(blocks, section(m.T("health.section.stale"), healthList(cx, m, r.Stale)))
 				}
 				if len(r.Cards) > 0 && show(HealthCards) {
 					items := make([]health.Issue, len(r.Cards))
@@ -93,10 +93,10 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					blocks = append(blocks, section(m.T("health.section.unsecured"), healthList(cx, m, r.Unsecured)))
 				}
 				if len(r.MissingURI) > 0 && show(HealthMissingURI) {
-					blocks = append(blocks, section("Missing Website URI", healthList(cx, m, r.MissingURI)))
+					blocks = append(blocks, section(m.T("health.section.missing_uri"), healthList(cx, m, r.MissingURI)))
 				}
 				if len(r.MissingName) > 0 && show(HealthMissingName) {
-					blocks = append(blocks, section("Missing Title", healthList(cx, m, r.MissingName)))
+					blocks = append(blocks, section(m.T("health.section.missing_name"), healthList(cx, m, r.MissingName)))
 				}
 				if len(r.Unreadable) > 0 && show(HealthUnreadable) {
 					blocks = append(blocks, unreadableSection(m, r.Unreadable))
@@ -114,41 +114,44 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 	}
 }
 
-func healthScoreTier(score int) (tier, textClass, pillBgClass, barBgClass string) {
+func healthScoreTier(m *AppModel, score int) (tier, textClass, pillBgClass, barBgClass string) {
 	switch {
 	case score >= 90:
-		return "Strong", "text-gv-success", "bg-gv-success/15", "bg-gv-success"
+		return m.T("health.score.tier.strong"), "text-gv-success", "bg-gv-success/15", "bg-gv-success"
 	case score >= 70:
-		return "Fair", "text-gv-accent", "bg-gv-accent-soft", "bg-gv-accent"
+		return m.T("health.score.tier.fair"), "text-gv-accent", "bg-gv-accent-soft", "bg-gv-accent"
 	case score >= 40:
-		return "Needs Attention", "text-gv-warn", "bg-gv-warn-soft", "bg-gv-warn"
+		return m.T("health.score.tier.needs_attention"), "text-gv-warn", "bg-gv-warn-soft", "bg-gv-warn"
 	default:
-		return "At Risk", "text-gv-danger", "bg-gv-danger/15", "bg-gv-danger"
+		return m.T("health.score.tier.at_risk"), "text-gv-danger", "bg-gv-danger/15", "bg-gv-danger"
 	}
 }
 
-func healthCountPhrase(n int, singular, plural string) string {
-	if n == 1 {
-		return "1 " + singular
-	}
-	return fmt.Sprintf("%d %s", n, plural)
-}
-
-func healthScoreCard(r health.Report) core.Node {
-	tier, textClass, pillBgClass, barBgClass := healthScoreTier(r.Score)
-	summary := "No active items to analyze."
+func healthScoreCard(m *AppModel, r health.Report) core.Node {
+	tier, textClass, pillBgClass, barBgClass := healthScoreTier(m, r.Score)
+	summary := m.T("health.score.no_active")
 	if r.ActiveItems > 0 {
-		summary = fmt.Sprintf("%s across %s.",
-			healthCountPhrase(r.TotalIssues(), "issue", "issues"),
-			healthCountPhrase(r.ActiveItems, "item", "items"))
+		issuesText := m.Tf("health.issues_many", r.TotalIssues())
+		if r.TotalIssues() == 1 {
+			issuesText = m.T("health.issues_one")
+		}
+		itemsText := m.Tf("health.items_many", r.ActiveItems)
+		if r.ActiveItems == 1 {
+			itemsText = m.T("health.items_one")
+		}
+		summary = m.Tf("health.score.summary", issuesText, itemsText)
 	}
-	breakdownDot := func(testID, dotClass, label string, count int) core.Node {
+	checkedText := m.Tf("health.breakdown.checked_many", r.ActiveItems)
+	if r.ActiveItems == 1 {
+		checkedText = m.T("health.breakdown.checked_one")
+	}
+	breakdownDot := func(testID, dotClass, text string) core.Node {
 		return core.View{
 			TestID: testID,
 			Class:  "flex-row items-center gap-1.5",
 			Children: []core.Node{
 				core.View{Class: "w-[7px] h-[7px] rounded-full " + dotClass},
-				core.Text{Class: "text-[11.5px] text-gv-fg2 tabular-nums", Content: fmt.Sprintf("%s: %d", label, count)},
+				core.Text{Class: "text-[11.5px] text-gv-fg2 tabular-nums", Content: text},
 			},
 		}
 	}
@@ -180,7 +183,7 @@ func healthScoreCard(r health.Report) core.Node {
 								core.View{
 									Class: "flex-row items-center justify-between gap-2",
 									Children: []core.Node{
-										core.Text{Class: "text-[14.5px] font-semibold text-gv-fg", Content: "Vault Health Score"},
+										core.Text{Class: "text-[14.5px] font-semibold text-gv-fg", Content: m.T("health.score.title")},
 										core.View{
 											Class: "px-2.5 py-[2px] rounded-full " + pillBgClass,
 											Children: []core.Node{
@@ -214,14 +217,14 @@ func healthScoreCard(r health.Report) core.Node {
 				core.View{
 					Class: "flex-row flex-wrap items-center gap-4 px-4 py-2.5",
 					Children: []core.Node{
-						breakdownDot("health-breakdown-high", "bg-gv-danger", "High risk", r.HighRisk()),
-						breakdownDot("health-breakdown-medium", "bg-gv-warn", "Medium risk", r.MediumRisk()),
-						breakdownDot("health-breakdown-low", "bg-gv-fg3", "Low risk", r.LowRisk()),
+						breakdownDot("health-breakdown-high", "bg-gv-danger", m.Tf("health.breakdown.high", r.HighRisk())),
+						breakdownDot("health-breakdown-medium", "bg-gv-warn", m.Tf("health.breakdown.medium", r.MediumRisk())),
+						breakdownDot("health-breakdown-low", "bg-gv-fg3", m.Tf("health.breakdown.low", r.LowRisk())),
 						core.View{Class: "flex-1"},
 						core.Text{
 							TestID:  "health-breakdown-checked",
 							Class:   "text-[11.5px] text-gv-fg3 tabular-nums",
-							Content: healthCountPhrase(r.ActiveItems, "item checked", "items checked"),
+							Content: checkedText,
 						},
 					},
 				},
@@ -308,17 +311,17 @@ func unreadableSection(m *AppModel, items []health.Issue) core.Node {
 			core.View{
 				Class: "flex-1 gap-[2px]",
 				Children: []core.Node{
-					core.Text{Class: "text-[13px] font-medium text-gv-fg", Content: "Could not decrypt on this device"},
+					core.Text{Class: "text-[13px] font-medium text-gv-fg", Content: m.T("health.unreadable.title")},
 					core.Text{
 						TestID:  "health-unreadable-subtitle",
 						Class:   "text-[11.5px] text-gv-fg2",
-						Content: "These personal items use a format GoVault cannot read yet. Update them in the web vault, then sync again.",
+						Content: m.T("health.unreadable.subtitle"),
 					},
 				},
 			},
 			ui.Button{
 				TestID:  "health-unreadable-sync",
-				Text:    "Sync Now",
+				Text:    m.T("common.sync_now"),
 				Icon:    lucide.RefreshCw,
 				Variant: ui.ButtonSecondary,
 				Size:    ui.SizeSmall,
@@ -328,6 +331,10 @@ func unreadableSection(m *AppModel, items []health.Issue) core.Node {
 		},
 	})
 	for _, it := range items {
+		name := it.Name
+		if name == "Unreadable item" {
+			name = m.T("health.unreadable.item_name")
+		}
 		rows = append(rows, core.View{
 			TestID: "health-unreadable-item",
 			Class:  "flex-row items-center gap-3 ps-3.5 pe-3 py-2 min-h-[48px]",
@@ -342,15 +349,15 @@ func unreadableSection(m *AppModel, items []health.Issue) core.Node {
 				core.View{
 					Class: "flex-1 gap-[2px] overflow-hidden",
 					Children: []core.Node{
-						core.Text{MaxLines: 1, Class: "text-[13.5px] text-gv-fg", Content: it.Name},
-						core.Text{MaxLines: 1, Class: "text-[11.5px] text-gv-fg3", Content: it.Subtitle},
+						core.Text{MaxLines: 1, Class: "text-[13.5px] text-gv-fg", Content: name},
+						core.Text{MaxLines: 1, Class: "text-[11.5px] text-gv-fg3", Content: m.healthSubtitleText(it)},
 					},
 				},
-				core.Text{MaxLines: 1, Class: "text-[12px] text-gv-fg2 text-end", Content: it.Detail},
+				core.Text{MaxLines: 1, Class: "text-[12px] text-gv-fg2 text-end", Content: m.healthDetailText(it.Detail)},
 			},
 		})
 	}
-	return section("Unreadable Items", card(rows...))
+	return section(m.T("health.section.unreadable"), card(rows...))
 }
 
 func healthList(cx *core.Scope, m *AppModel, items []health.Issue) core.Node {
@@ -359,7 +366,7 @@ func healthList(cx *core.Scope, m *AppModel, items []health.Issue) core.Node {
 		issue := it
 		title := strings.TrimSpace(issue.Name)
 		if title == "" {
-			title = "Untitled"
+			title = m.T("common.untitled")
 		}
 		rows = append(rows, core.View{
 			TestID:  "health-item",
@@ -373,7 +380,7 @@ func healthList(cx *core.Scope, m *AppModel, items []health.Issue) core.Node {
 					Class: "flex-1 gap-[2px] overflow-hidden",
 					Children: []core.Node{
 						core.Text{MaxLines: 1, Class: "text-[13.5px] text-gv-fg", Content: title},
-						core.Text{MaxLines: 1, Class: "text-[11.5px] text-gv-fg3", Content: issue.Subtitle},
+						core.Text{MaxLines: 1, Class: "text-[11.5px] text-gv-fg3", Content: m.healthSubtitleText(issue)},
 					},
 				},
 				core.Text{MaxLines: 1, Class: "text-[12px] text-gv-fg2 text-end", Content: m.healthDetailText(issue.Detail)},

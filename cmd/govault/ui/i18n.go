@@ -11,8 +11,10 @@ import (
 	"github.com/txchen/govault/internal/vaultcore/api"
 	"github.com/txchen/govault/internal/vaultcore/crypto"
 	"github.com/txchen/govault/internal/vaultcore/export"
+	"github.com/txchen/govault/internal/vaultcore/health"
 	"github.com/txchen/govault/internal/vaultcore/i18n"
 	"github.com/txchen/govault/internal/vaultcore/state"
+	"github.com/txchen/govault/internal/vaultcore/urlcheck"
 )
 
 func init() {
@@ -148,11 +150,11 @@ func (m *AppModel) friendlyError(err error) string {
 	case errors.Is(err, state.ErrCipherInTrash):
 		return m.T("error.cipher_in_trash")
 	case errors.Is(err, state.ErrSignInRequired):
-		return "Sign in again to make changes."
+		return m.T("error.sign_in_again")
 	case errors.Is(err, state.ErrReadOnlyCipher):
-		return "Read-only items cannot be modified."
+		return m.T("error.readonly_cipher")
 	case errors.Is(err, state.ErrFolderNotFound):
-		return "The selected folder no longer exists."
+		return m.T("error.folder_not_found")
 	default:
 		return err.Error()
 	}
@@ -176,6 +178,12 @@ func (m *AppModel) healthDetailText(detail string) string {
 	if _, err := fmt.Sscanf(detail, "Shorter than %d characters", &n); err == nil {
 		return m.Tf("health.detail.too_short", n)
 	}
+	if _, err := fmt.Sscanf(detail, "Unchanged for %d days", &n); err == nil {
+		return m.Tf("health.detail.unchanged_days", n)
+	}
+	if _, err := fmt.Sscanf(detail, "Unchanged for %d years", &n); err == nil {
+		return m.Tf("health.detail.unchanged_years", n)
+	}
 	if rest, ok := strings.CutPrefix(detail, "Expired "); ok {
 		return m.Tf("health.detail.card_expired", rest)
 	}
@@ -191,8 +199,116 @@ func (m *AppModel) healthDetailText(detail string) string {
 		return m.T("health.detail.single_class")
 	case "Easy to guess":
 		return m.T("health.detail.easy")
+	case "No website URI":
+		return m.T("health.detail.no_uri")
+	case "No password set":
+		return m.T("health.detail.no_password")
+	case "Missing title":
+		return m.T("health.detail.missing_title")
+	case "Could not decrypt":
+		return m.T("health.detail.could_not_decrypt")
 	default:
 		return detail
+	}
+}
+
+func (m *AppModel) healthSubtitleText(it health.Issue) string {
+	if id, ok := strings.CutPrefix(it.Subtitle, "Item ID: "); ok {
+		return m.Tf("health.unreadable.item_id", id)
+	}
+	switch it.Subtitle {
+	case "Login":
+		return m.T("cipher.type.login")
+	case "Secure Note":
+		return m.T("cipher.type.secure_note")
+	case "Card":
+		return m.T("cipher.type.card")
+	case "Identity":
+		return m.T("cipher.type.identity")
+	case "SSH Key":
+		return m.T("cipher.type.ssh_key")
+	case "Item":
+		return m.T("cipher.type.item")
+	default:
+		return it.Subtitle
+	}
+}
+
+func (m *AppModel) translateDedupBlocked(reason string) string {
+	switch reason {
+	case "Contains read-only items with hidden passwords":
+		return m.T("dedup.blocked.readonly_and_hidden")
+	case "Contains a read-only organization item":
+		return m.T("dedup.blocked.readonly")
+	case "Contains an item whose password is hidden by your organization":
+		return m.T("dedup.blocked.hide_password")
+	default:
+		return reason
+	}
+}
+
+func (m *AppModel) translateDedupDiff(fields []string) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]string, len(fields))
+	for i, f := range fields {
+		switch f {
+		case "Name":
+			out[i] = m.T("field.name")
+		case "Username":
+			out[i] = m.T("field.username")
+		case "Password":
+			out[i] = m.T("field.password")
+		case "TOTP":
+			out[i] = m.T("dedup.badge.totp")
+		case "Notes":
+			out[i] = m.T("section.notes")
+		case "URIs":
+			out[i] = m.T("dedup.diff.uris")
+		case "Custom Fields":
+			out[i] = m.T("section.custom_fields")
+		case "Passkeys":
+			out[i] = m.T("dedup.diff.passkeys")
+		case "Attachments":
+			out[i] = m.T("section.attachments")
+		case "Favorite":
+			out[i] = m.T("import.diff.favorite")
+		case "Reprompt":
+			out[i] = m.T("import.diff.reprompt")
+		case "Folder":
+			out[i] = m.T("dedup.diff.folder")
+		default:
+			out[i] = f
+		}
+	}
+	return out
+}
+
+func (m *AppModel) urlCheckReasonText(it urlcheck.DeadItem) string {
+	switch it.Reason {
+	case urlcheck.ReasonDNSNotFound:
+		return m.T("urlcheck.reason.dns_not_found")
+	case urlcheck.ReasonRefused:
+		return m.T("urlcheck.reason.refused")
+	case urlcheck.ReasonTimeout:
+		return m.T("urlcheck.reason.timeout")
+	case urlcheck.ReasonTLSError:
+		return m.T("urlcheck.reason.tls_error")
+	case urlcheck.ReasonNotFound:
+		if it.StatusCode > 0 {
+			return m.Tf("urlcheck.reason.http_code", it.StatusCode)
+		}
+		return m.T("urlcheck.reason.not_found")
+	case urlcheck.ReasonServerError:
+		if it.StatusCode > 0 {
+			return m.Tf("urlcheck.reason.http_code", it.StatusCode)
+		}
+		return m.T("urlcheck.reason.server_error")
+	case urlcheck.ReasonInvalidURL:
+		return m.T("urlcheck.reason.invalid_url")
+	default:
+		return m.T("urlcheck.reason.unreachable")
 	}
 }
 

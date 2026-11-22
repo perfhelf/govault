@@ -358,3 +358,130 @@ func TestAllReferencedI18nKeysExist(t *testing.T) {
 		t.Fatal("found zero i18n lookup calls")
 	}
 }
+
+func TestI18nNewPRSurfacesLocalizedAndRTL(t *testing.T) {
+	zh := i18n.NewCatalog("zh-CN")
+	ar := i18n.NewCatalog("ar")
+
+	// 1. Logged-out screen: API Key auth mode & Login Profile dropzone localize cleanly and mirror in Arabic.
+	loggedOutSvc := newMockVaultService(state.StatusLoggedOut)
+	loginApp, loginModel, _ := startSecurityApp(t, loggedOutSvc, PlatformHooks{})
+
+	loginApp.WaitFor("id:login-auth-mode", 2*time.Second)
+	loginApp.Post(func() { loginModel.SetLanguage("zh-CN") })
+	loginApp.WaitFor("id:login-mode-apikey >> text:"+zh.T("login.mode.apikey"), 2*time.Second)
+	loginApp.Find("id:login-profile-dropzone >> text:" + zh.T("profile.dropzone_hint"))
+	loginApp.Find("id:login-import-profile >> text:" + zh.T("profile.import.btn"))
+
+	loginApp.Press("id:login-mode-apikey")
+	loginApp.WaitFor("id:login-screen >> text:"+zh.T("login.apikey.local_note"), 2*time.Second)
+
+	loginApp.Post(func() { loginModel.SetLanguage("ar") })
+	loginApp.WaitFor("id:login-mode-apikey >> text:"+ar.T("login.mode.apikey"), 2*time.Second)
+	loginApp.Find("id:login-screen >> text:" + ar.T("login.apikey.local_note"))
+	scopeRTL, windowRTL := readScopeRTL(loginApp, loginModel)
+	if !scopeRTL || !windowRTL {
+		t.Fatalf("login Arabic RTL = (%v, %v), want (true, true)", scopeRTL, windowRTL)
+	}
+
+	// 2. Unlocked workspace: Login Profile export dialog, Batch Ops, Health Plus, Dedup, and Website Check.
+	svc := newMockVaultService(state.StatusUnlocked)
+	svc.folders = []state.Folder{{ID: "f-main", Name: "Main"}}
+	svc.order = []string{"c-dup1", "c-dup2", "c-bad-url"}
+	svc.ciphers = map[string]*state.Cipher{
+		"c-dup1": {
+			ID:   "c-dup1",
+			Type: api.CipherTypeLogin,
+			Name: "Shop Duplicate",
+			Login: &state.Login{
+				Username: "user@shop.example",
+				Password: "weak",
+				URIs:     []state.LoginURI{{URI: "https://shop.example"}},
+			},
+		},
+		"c-dup2": {
+			ID:   "c-dup2",
+			Type: api.CipherTypeLogin,
+			Name: "Shop Duplicate",
+			Login: &state.Login{
+				Username: "user@shop.example",
+				Password: "weak",
+				URIs:     []state.LoginURI{{URI: "https://shop.example"}},
+			},
+		},
+		"c-bad-url": {
+			ID:   "c-bad-url",
+			Type: api.CipherTypeLogin,
+			Name: "Broken Site",
+			Login: &state.Login{
+				Username: "bob",
+				Password: "VeryStrongUnique!Password#2026",
+				URIs:     []state.LoginURI{{URI: "https://[bad"}},
+			},
+		},
+	}
+
+	app, m, _ := startSecurityApp(t, svc, PlatformHooks{})
+
+	app.Press("id:sidebar-settings")
+	app.WaitFor("id:settings-language", 2*time.Second)
+	selectOption(t, app, "settings-language", 2) // zh-CN
+
+	// Settings + Login Profile export dialog.
+	app.WaitFor("id:settings-export-login-profile >> text:"+zh.T("settings.account.login_profile_btn"), 2*time.Second)
+	app.Press("id:settings-export-login-profile")
+	app.WaitFor("id:profile-export-dialog >> text:"+zh.T("profile.export.title"), 2*time.Second)
+	app.Find("id:profile-export-confirm >> text:" + zh.T("profile.export.confirm_btn"))
+	app.Press("id:profile-export-cancel")
+	app.WaitUntil(2*time.Second, func() bool { return !m.ProfileExportOpen.Get() })
+
+	// Batch Ops in vault list.
+	app.Press("id:sidebar-all")
+	app.WaitFor("id:batch-select-toggle", 2*time.Second)
+	app.Press("id:batch-select-toggle")
+	app.WaitFor("id:batch-action-bar >> text:"+zh.Tf("batch.selected_count", 0), 2*time.Second)
+	app.Find("id:batch-move-folder-btn >> text:" + zh.T("batch.move_folder_btn"))
+	app.Press("id:batch-select-toggle")
+
+	// Health Plus.
+	app.Press("id:sidebar-health")
+	app.WaitFor("id:health-score-card >> text:"+zh.T("health.score.title"), 2*time.Second)
+	app.Find("id:health-tiles >> text:" + zh.T("health.tile.weak"))
+	app.Find("id:health-tiles >> text:" + zh.T("health.tile.unreadable"))
+
+	// Dedup.
+	app.Press("id:sidebar-dedup")
+	app.WaitFor("id:dedup-count-exact >> text:"+zh.T("dedup.tile.exact"), 2*time.Second)
+	app.Find("id:dedup-select-exact >> text:" + zh.T("dedup.select_exact"))
+	app.Find("id:dedup-simplify-urls >> text:" + zh.T("dedup.simplify_urls"))
+	app.Find("id:dedup-item-c-dup1 >> text:" + zh.T("dedup.badge.keep"))
+	app.Find("id:dedup-view >> text:" + zh.T("dedup.footer"))
+
+	// Website Check (idle + scan results + batch bar).
+	app.Press("id:sidebar-urlcheck")
+	app.WaitFor("id:urlcheck-idle >> text:"+zh.T("urlcheck.privacy_notice"), 2*time.Second)
+	app.Press("id:urlcheck-scan-btn")
+	app.WaitFor("id:urlcheck-batch-bar", 2*time.Second)
+	app.Find("id:urlcheck-select-all >> text:" + zh.T("common.select_all"))
+	app.Find("id:urlcheck-batch-move >> text:" + zh.T("batch.move_folder_btn"))
+	app.Find("id:urlcheck-badge-c-bad-url >> text:" + zh.T("urlcheck.reason.invalid_url"))
+
+	// Switch to Arabic and verify live localization + RTL across the new views.
+	app.Post(func() { m.SetLanguage("ar") })
+	app.WaitFor("id:urlcheck-results >> text:"+ar.T("urlcheck.section_title"), 2*time.Second)
+	app.Find("id:urlcheck-badge-c-bad-url >> text:" + ar.T("urlcheck.reason.invalid_url"))
+	app.Find("id:urlcheck-batch-trash >> text:" + ar.T("common.move_to_trash"))
+
+	scopeRTL, windowRTL = readScopeRTL(app, m)
+	if !scopeRTL || !windowRTL {
+		t.Fatalf("urlcheck Arabic RTL = (%v, %v), want (true, true)", scopeRTL, windowRTL)
+	}
+
+	app.Press("id:sidebar-dedup")
+	app.WaitFor("id:dedup-count-exact >> text:"+ar.T("dedup.tile.exact"), 2*time.Second)
+	app.Find("id:dedup-item-c-dup1 >> text:" + ar.T("dedup.badge.keep"))
+	app.Find("id:dedup-view >> text:" + ar.T("dedup.footer"))
+
+	app.Press("id:sidebar-health")
+	app.WaitFor("id:health-score-card >> text:"+ar.T("health.score.title"), 2*time.Second)
+}

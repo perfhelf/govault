@@ -219,21 +219,21 @@ func (m *AppModel) StartMergeSelected(cx *core.Scope) {
 	m.ResetIdleTimer()
 
 	var parts []string
-	parts = append(parts, fmt.Sprintf("Process %d duplicate group(s):", len(sum.selections)))
+	parts = append(parts, m.Tf("dedup.confirm.process_line", len(sum.selections)))
 	if sum.pureDeletes > 0 {
-		parts = append(parts, fmt.Sprintf("• %d pure delete group(s) (Path A)", sum.pureDeletes))
+		parts = append(parts, m.Tf("dedup.confirm.pure_delete_line", sum.pureDeletes))
 	}
 	if sum.merges > 0 {
-		parts = append(parts, fmt.Sprintf("• %d smart merge group(s) (Path B)", sum.merges))
+		parts = append(parts, m.Tf("dedup.confirm.merge_line", sum.merges))
 	}
-	parts = append(parts, fmt.Sprintf("%d duplicate item(s) will move to Trash (recoverable for 30 days).", sum.trashedItems))
+	parts = append(parts, m.Tf("dedup.confirm.trash_line", sum.trashedItems))
 
 	cx.ShowAlert(core.AlertConfig{
-		Title:   "Merge selected duplicates?",
+		Title:   m.T("dedup.confirm.title"),
 		Message: strings.Join(parts, "\n"),
 		Actions: []core.AlertAction{
-			{Label: "Cancel", Role: core.AlertCancel},
-			{Label: "Merge Selected", Role: core.AlertDestructive},
+			{Label: m.T("common.cancel"), Role: core.AlertCancel},
+			{Label: m.T("dedup.merge_btn_action"), Role: core.AlertDestructive},
 		},
 		Cancelable: true,
 	}, func(idx int) {
@@ -242,7 +242,7 @@ func (m *AppModel) StartMergeSelected(cx *core.Scope) {
 		}
 		run := func() { m.executeDedupMerge(sum.selections) }
 		if sum.anyReprompt {
-			m.GateReprompt(cx, &state.Cipher{Reprompt: 1}, "merge protected duplicate items", run)
+			m.GateReprompt(cx, &state.Cipher{Reprompt: 1}, m.T("reprompt.action.merge_dedup"), run)
 			return
 		}
 		run()
@@ -302,18 +302,18 @@ func (m *AppModel) executeDedupMerge(selections []dedup.GroupSelection) {
 			m.DedupResult.Set(&execRes)
 			m.RefreshVaultData()
 
-			summaryTitle := fmt.Sprintf("Merged %d/%d group(s)", execRes.SucceededGroups, execRes.TotalGroups)
+			summaryTitle := m.Tf("dedup.toast.merged_title", execRes.SucceededGroups, execRes.TotalGroups)
 			switch {
 			case execRes.Cancelled:
-				m.ShowToast(ui.ToastInfo, "Duplicate merge cancelled", "")
+				m.ShowToast(ui.ToastInfo, m.T("dedup.toast.cancelled"), "")
 			case execRes.LocalCopyErr != nil && execRes.FailedGroups == 0:
 				m.ShowLocalCopyWarning(summaryTitle)
 			case execRes.FailedGroups > 0 && execRes.SucceededGroups == 0:
-				m.ShowToast(ui.ToastError, "Merge failed", m.friendlyError(execRes.Err))
+				m.ShowToast(ui.ToastError, m.T("dedup.toast.failed"), m.friendlyError(execRes.Err))
 			case execRes.FailedGroups > 0:
-				m.ShowToast(ui.ToastWarning, summaryTitle, fmt.Sprintf("%d group(s) failed; originals kept safe", execRes.FailedGroups))
+				m.ShowToast(ui.ToastWarning, summaryTitle, m.Tf("dedup.toast.partial_failed_desc", execRes.FailedGroups))
 			default:
-				m.ShowToast(ui.ToastSuccess, summaryTitle, fmt.Sprintf("%d item(s) moved to Trash", execRes.DeletedCount))
+				m.ShowToast(ui.ToastSuccess, summaryTitle, m.Tf("dedup.toast.trashed_desc", execRes.DeletedCount))
 			}
 		})
 	}()
@@ -335,17 +335,17 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 					core.View{
 						Class: "flex-row gap-3",
 						Children: []core.Node{
-							dedupTile(m, DedupExact, lucide.CopyCheck, 0x5856d6, r.Stats.ExactGroups, "Exact Duplicates", filter == DedupExact, true),
-							dedupTile(m, DedupSameSite, lucide.Layers, 0x0a84ff, r.Stats.SameSiteGroups, "Same-Site Duplicates", filter == DedupSameSite, true),
-							dedupTile(m, DedupAll, lucide.Trash, 0xf08a0a, r.Stats.RedundantItems, "Redundant Items", false, false),
+							dedupTile(m, DedupExact, lucide.CopyCheck, 0x5856d6, r.Stats.ExactGroups, m.T("dedup.tile.exact"), filter == DedupExact, true),
+							dedupTile(m, DedupSameSite, lucide.Layers, 0x0a84ff, r.Stats.SameSiteGroups, m.T("dedup.tile.samesite"), filter == DedupSameSite, true),
+							dedupTile(m, DedupAll, lucide.Trash, 0xf08a0a, r.Stats.RedundantItems, m.T("dedup.tile.redundant"), false, false),
 						},
 					},
 				}
 
 				if offlineOrLocal {
-					msg := "Offline — duplicate merging is disabled until your connection is restored."
+					msg := m.T("dedup.offline_banner")
 					if m.LocalOnly.Get() {
-						msg = "Sign in again to merge or remove duplicates. Vault changes are disabled in local-only mode."
+						msg = m.T("dedup.local_only_banner")
 					}
 					blocks = append(blocks, core.View{
 						TestID: "dedup-offline-banner",
@@ -375,8 +375,8 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 							core.View{
 								Class: "flex-1 gap-[2px]",
 								Children: []core.Node{
-									core.Text{Class: "text-[14px] font-semibold text-gv-fg", Content: "No duplicates found"},
-									core.Text{Class: "text-[12px] text-gv-fg2", Content: "Your active login items have no exact or same-site duplicates."},
+									core.Text{Class: "text-[14px] font-semibold text-gv-fg", Content: m.T("dedup.all_clear_title")},
+									core.Text{Class: "text-[12px] text-gv-fg2", Content: m.T("dedup.all_clear_desc")},
 								},
 							},
 						},
@@ -389,9 +389,9 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 								ui.Tabs[DedupFilterTab]{
 									TestID: "dedup-filter-tabs",
 									Options: []ui.Option[DedupFilterTab]{
-										{Value: DedupAll, Label: "All"},
-										{Value: DedupExact, Label: "Exact"},
-										{Value: DedupSameSite, Label: "Same-Site"},
+										{Value: DedupAll, Label: m.T("dedup.filter.all")},
+										{Value: DedupExact, Label: m.T("dedup.filter.exact")},
+										{Value: DedupSameSite, Label: m.T("dedup.filter.same_site")},
 									},
 									Value:    m.DedupFilter.Get,
 									OnChange: m.SetDedupFilter,
@@ -401,7 +401,7 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 									Children: []core.Node{
 										ui.Button{
 											TestID:   "dedup-select-exact",
-											Text:     "Select Exact",
+											Text:     m.T("dedup.select_exact"),
 											Variant:  ui.ButtonSecondary,
 											Size:     ui.SizeSmall,
 											Disabled: m.DedupMergeDisabled,
@@ -409,7 +409,7 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 										},
 										ui.Button{
 											TestID:   "dedup-clear-selection",
-											Text:     "Clear",
+											Text:     m.T("common.clear"),
 											Variant:  ui.ButtonGhost,
 											Size:     ui.SizeSmall,
 											Disabled: m.DedupMergeDisabled,
@@ -424,8 +424,8 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 							Children: []core.Node{
 								ui.Checkbox{
 									TestID:   "dedup-simplify-urls",
-									Text:     "Simplify URLs",
-									Label:    "Simplify URLs to base domain during merge",
+									Text:     m.T("dedup.simplify_urls"),
+									Label:    m.T("dedup.simplify_urls_a11y"),
 									Checked:  m.DedupSimplifyURLs.Get,
 									Disabled: m.DedupMergeDisabled,
 									OnChange: func(v bool) {
@@ -435,7 +435,7 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 								},
 								ui.Button{
 									TestID:   "dedup-merge-btn",
-									Text:     fmt.Sprintf("Merge Selected (%d)", len(sum.selections)),
+									Text:     m.Tf("dedup.merge_btn", len(sum.selections)),
 									Icon:     lucide.Combine,
 									Variant:  ui.ButtonPrimary,
 									Busy:     m.DedupBusy.Get,
@@ -457,7 +457,7 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 						blocks = append(blocks, core.Text{
 							TestID:  "dedup-filter-empty",
 							Class:   "px-1 text-[12.5px] text-gv-fg2",
-							Content: "No duplicate groups in this filter.",
+							Content: m.T("dedup.filter.empty"),
 						})
 					} else {
 						for _, g := range visible {
@@ -468,7 +468,7 @@ func DedupView(cx *core.Scope, m *AppModel) core.Node {
 
 				blocks = append(blocks, core.Text{
 					Class:   "px-1 text-[11.5px] text-gv-fg3",
-					Content: "Analyzed locally on this device. Merged duplicates are moved to Trash for 30 days.",
+					Content: m.T("dedup.footer"),
 				})
 
 				return core.View{
@@ -537,9 +537,9 @@ func dedupProgressCard(m *AppModel) core.Node {
 						ContentFunc: func() string {
 							p := m.DedupProgress.Get()
 							if p.CurrentGroup != "" {
-								return "Merging: " + p.CurrentGroup
+								return m.Tf("dedup.progress.merging_group", p.CurrentGroup)
 							}
-							return "Merging duplicates…"
+							return m.T("dedup.progress.merging")
 						},
 					},
 					core.View{
@@ -549,12 +549,12 @@ func dedupProgressCard(m *AppModel) core.Node {
 								Class: "text-[12px] text-gv-fg2 tabular-nums",
 								ContentFunc: func() string {
 									p := m.DedupProgress.Get()
-									return fmt.Sprintf("%d / %d groups", p.CompletedGroups, p.TotalGroups)
+									return m.Tf("dedup.progress.count", p.CompletedGroups, p.TotalGroups)
 								},
 							},
 							ui.Button{
 								TestID:  "dedup-cancel-btn",
-								Text:    "Cancel",
+								Text:    m.T("common.cancel"),
 								Variant: ui.ButtonGhost,
 								Size:    ui.SizeSmall,
 								OnPress: m.cancelDedupMerge,
@@ -565,7 +565,7 @@ func dedupProgressCard(m *AppModel) core.Node {
 			},
 			ui.Progress{
 				TestID: "dedup-progress",
-				Label:  "Merging duplicates",
+				Label:  m.T("dedup.progress.label"),
 				Value:  func() float32 { return m.DedupProgress.Get().Percent },
 			},
 		},
@@ -575,19 +575,18 @@ func dedupProgressCard(m *AppModel) core.Node {
 func dedupResultCard(m *AppModel, res *dedup.ExecuteReport) core.Node {
 	glyph := lucide.CircleCheck()
 	tintClass := "text-gv-success"
-	headline := fmt.Sprintf("Merged %d group(s): %d created, %d updated, %d moved to Trash",
-		res.SucceededGroups, res.CreatedCount, res.UpdatedCount, res.DeletedCount)
-	sub := "Duplicates were moved to Trash and remain recoverable for 30 days."
+	headline := m.Tf("dedup.result.merged", res.SucceededGroups, res.CreatedCount, res.UpdatedCount, res.DeletedCount)
+	sub := m.T("dedup.result.merged_sub")
 
 	if res.Cancelled {
 		glyph = lucide.TriangleAlert()
 		tintClass = "text-gv-warn"
-		headline = fmt.Sprintf("Merge cancelled (%d/%d groups completed)", res.SucceededGroups, res.TotalGroups)
-		sub = "Remaining items were left unchanged."
+		headline = m.Tf("dedup.result.cancelled", res.SucceededGroups, res.TotalGroups)
+		sub = m.T("dedup.result.cancelled_sub")
 	} else if res.FailedGroups > 0 {
 		glyph = lucide.TriangleAlert()
 		tintClass = "text-gv-warn"
-		headline = fmt.Sprintf("Completed %d/%d group(s); %d failed", res.SucceededGroups, res.TotalGroups, res.FailedGroups)
+		headline = m.Tf("dedup.result.failed", res.SucceededGroups, res.TotalGroups, res.FailedGroups)
 		var reasons []string
 		for _, r := range res.Results {
 			if r.Err != nil {
@@ -600,7 +599,7 @@ func dedupResultCard(m *AppModel, res *dedup.ExecuteReport) core.Node {
 	} else if res.LocalCopyErr != nil {
 		glyph = lucide.TriangleAlert()
 		tintClass = "text-gv-warn"
-		sub = "Saved on the server, but the encrypted local copy could not be updated. Sync to refresh."
+		sub = m.T("dedup.result.local_copy_sub")
 	}
 
 	return card(core.View{
@@ -617,7 +616,7 @@ func dedupResultCard(m *AppModel, res *dedup.ExecuteReport) core.Node {
 			},
 			ui.Button{
 				TestID:  "dedup-result-dismiss",
-				Text:    "Dismiss",
+				Text:    m.T("common.dismiss"),
 				Variant: ui.ButtonGhost,
 				Size:    ui.SizeSmall,
 				OnPress: m.DismissDedupResult,
@@ -633,28 +632,28 @@ func dedupGroupCard(cx *core.Scope, m *AppModel, g dedup.Group) core.Node {
 		keepID = g.Items[0].ID
 	}
 
-	typeBadge := ui.Badge{Text: "Exact", Variant: ui.BadgeAccent}
+	typeBadge := ui.Badge{Text: m.T("dedup.badge.exact"), Variant: ui.BadgeAccent}
 	if g.Type == dedup.GroupSameSite {
-		typeBadge = ui.Badge{Text: "Same-Site", Variant: ui.BadgeInfo}
+		typeBadge = ui.Badge{Text: m.T("dedup.badge.same_site"), Variant: ui.BadgeInfo}
 	}
 
 	var pathBadge ui.Badge
 	switch {
 	case g.BlockedReason != "":
-		pathBadge = ui.Badge{Text: "Read-Only", Variant: ui.BadgeWarn}
+		pathBadge = ui.Badge{Text: m.T("dedup.badge.readonly"), Variant: ui.BadgeWarn}
 	case g.PureDelete:
-		pathBadge = ui.Badge{Text: "Path A · Pure Delete", Variant: ui.BadgeUp}
+		pathBadge = ui.Badge{Text: m.T("dedup.badge.path_a"), Variant: ui.BadgeUp}
 	default:
-		pathBadge = ui.Badge{Text: "Path B · Merge", Variant: ui.BadgeNeutral}
+		pathBadge = ui.Badge{Text: m.T("dedup.badge.path_b"), Variant: ui.BadgeNeutral}
 	}
 
-	meta := fmt.Sprintf("%d items", len(g.Items))
+	meta := m.Tf("dedup.group_meta", len(g.Items))
 	if g.OrganizationID != "" {
 		orgName := m.OrganizationName(&g.OrganizationID)
 		if orgName == "" {
-			orgName = "Organization"
+			orgName = m.T("dedup.org_fallback")
 		}
-		meta += " · " + orgName
+		meta = m.Tf("dedup.group_meta_org", len(g.Items), orgName)
 	}
 
 	headerRow := core.View{
@@ -662,7 +661,7 @@ func dedupGroupCard(cx *core.Scope, m *AppModel, g dedup.Group) core.Node {
 		Children: []core.Node{
 			ui.Checkbox{
 				TestID:  "dedup-group-check-" + g.ID,
-				Label:   "Select " + g.Label,
+				Label:   m.Tf("a11y.select_named", g.Label),
 				Checked: func() bool { return m.DedupSelected.Get()[g.ID] },
 				Disabled: func() bool {
 					return g.BlockedReason != "" || m.DedupMergeDisabled()
@@ -691,22 +690,22 @@ func dedupGroupCard(cx *core.Scope, m *AppModel, g dedup.Group) core.Node {
 			Class:  "flex-row items-center gap-2 px-4 py-2 bg-gv-warn-soft",
 			Children: []core.Node{
 				icon(lucide.ShieldAlert(), 13, "text-gv-warn"),
-				core.Text{Class: "flex-1 text-[12px] text-gv-warn", Content: g.BlockedReason},
+				core.Text{Class: "flex-1 text-[12px] text-gv-warn", Content: m.translateDedupBlocked(g.BlockedReason)},
 			},
 		})
 	}
 
 	if len(g.DiffFields) > 0 {
 		diffNodes := []core.Node{
-			core.Text{Class: "text-[11.5px] font-medium text-gv-fg2", Content: "Differs:"},
+			core.Text{Class: "text-[11.5px] font-medium text-gv-fg2", Content: m.T("dedup.diff.label")},
 		}
-		for _, d := range g.DiffFields {
+		for _, d := range m.translateDedupDiff(g.DiffFields) {
 			diffNodes = append(diffNodes, ui.Badge{Text: d, Variant: ui.BadgeWarn})
 		}
 		if g.Type == dedup.GroupSameSite && slices.Contains(g.DiffFields, "Username") {
 			diffNodes = append(diffNodes, core.Text{
 				Class:   "text-[11.5px] text-gv-warn",
-				Content: "Different usernames — verify before merging",
+				Content: m.T("dedup.diff.username_warning"),
 			})
 		}
 		rows = append(rows, core.View{
@@ -720,17 +719,17 @@ func dedupGroupCard(cx *core.Scope, m *AppModel, g dedup.Group) core.Node {
 	for _, it := range g.Items {
 		keepOptions = append(keepOptions, ui.Option[string]{
 			Value: it.ID,
-			Label: dedupKeepOptionLabel(it),
+			Label: dedupKeepOptionLabel(m, it),
 		})
 	}
 
 	rows = append(rows, core.View{
 		Class: "flex-row items-center justify-between gap-3 px-4 py-2",
 		Children: []core.Node{
-			core.Text{Class: "text-[12px] font-medium text-gv-fg2", Content: "Keep item"},
+			core.Text{Class: "text-[12px] font-medium text-gv-fg2", Content: m.T("dedup.keep_item")},
 			ui.Select[string]{
 				TestID:  "dedup-keep-" + g.ID,
-				Label:   "Keep item for " + g.Label,
+				Label:   m.Tf("dedup.keep_item_a11y", g.Label),
 				Style:   core.Style{Width: core.Pt(260)},
 				Options: keepOptions,
 				Value: func() string {
@@ -768,9 +767,9 @@ func dedupGroupCard(cx *core.Scope, m *AppModel, g dedup.Group) core.Node {
 func dedupItemRow(cx *core.Scope, m *AppModel, c *state.Cipher, folders map[string]string, isKeep, pureDelete, blocked bool) core.Node {
 	name := strings.TrimSpace(c.Name)
 	if name == "" {
-		name = "Untitled"
+		name = m.T("common.untitled")
 	}
-	user := "No username"
+	user := m.T("dedup.no_username")
 	if c.Login != nil && strings.TrimSpace(c.Login.Username) != "" {
 		user = c.Login.Username
 	}
@@ -786,40 +785,40 @@ func dedupItemRow(cx *core.Scope, m *AppModel, c *state.Cipher, folders map[stri
 
 	var badges []core.Node
 	if c.Login != nil && len(c.Login.Fido2Credentials) > 0 {
-		badges = append(badges, ui.Badge{Text: fmt.Sprintf("Passkey (%d)", len(c.Login.Fido2Credentials)), Variant: ui.BadgeAccent})
+		badges = append(badges, ui.Badge{Text: m.Tf("dedup.badge.passkey", len(c.Login.Fido2Credentials)), Variant: ui.BadgeAccent})
 	}
 	if len(c.Attachments) > 0 {
-		badges = append(badges, ui.Badge{Text: fmt.Sprintf("Files (%d)", len(c.Attachments)), Variant: ui.BadgeInfo})
+		badges = append(badges, ui.Badge{Text: m.Tf("dedup.badge.files", len(c.Attachments)), Variant: ui.BadgeInfo})
 	}
 	if c.Login != nil && strings.TrimSpace(c.Login.TOTP) != "" {
-		badges = append(badges, ui.Badge{Text: "TOTP", Variant: ui.BadgeNeutral})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.totp"), Variant: ui.BadgeNeutral})
 	}
 	if len(c.Fields) > 0 {
-		badges = append(badges, ui.Badge{Text: fmt.Sprintf("%d fields", len(c.Fields)), Variant: ui.BadgeNeutral})
+		badges = append(badges, ui.Badge{Text: m.Tf("dedup.badge.fields_count", len(c.Fields)), Variant: ui.BadgeNeutral})
 	}
 	if c.Favorite {
-		badges = append(badges, ui.Badge{Text: "Favorite", Variant: ui.BadgeNeutral})
+		badges = append(badges, ui.Badge{Text: m.T("editor.favorite"), Variant: ui.BadgeNeutral})
 	}
 	if c.Reprompt != 0 {
-		badges = append(badges, ui.Badge{Text: "Reprompt", Variant: ui.BadgeWarn})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.reprompt"), Variant: ui.BadgeWarn})
 	}
 
 	switch {
 	case blocked:
-		badges = append(badges, ui.Badge{Text: "Locked", Variant: ui.BadgeOutline})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.locked"), Variant: ui.BadgeOutline})
 	case isKeep:
-		badges = append(badges, ui.Badge{Text: "Keep", Variant: ui.BadgeUp})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.keep"), Variant: ui.BadgeUp})
 	case pureDelete:
-		badges = append(badges, ui.Badge{Text: "Trash", Variant: ui.BadgeDown})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.trash"), Variant: ui.BadgeDown})
 	default:
-		badges = append(badges, ui.Badge{Text: "Merge & Trash", Variant: ui.BadgeWarn})
+		badges = append(badges, ui.Badge{Text: m.T("dedup.badge.merge_trash"), Variant: ui.BadgeWarn})
 	}
 
 	return core.View{
 		TestID:  "dedup-item-" + c.ID,
 		Role:    core.RoleButton,
-		Label:   "Open " + name,
-		Class:   "flex-row items-center gap-3 pl-4 pr-3 py-2.5 min-h-[50px] active:bg-gv-fill",
+		Label:   m.Tf("a11y.open_item", name),
+		Class:   "flex-row items-center gap-3 ps-4 pe-3 py-2.5 min-h-[50px] active:bg-gv-fill",
 		OnPress: func(core.PressEvent) { m.OpenHealthItem(cx, c.ID) },
 		Children: []core.Node{
 			itemEmblem(name, api.CipherTypeLogin, "", 26),
@@ -834,34 +833,34 @@ func dedupItemRow(cx *core.Scope, m *AppModel, c *state.Cipher, folders map[stri
 				Class:    "flex-row flex-wrap items-center justify-end gap-1",
 				Children: badges,
 			},
-			icon(lucide.ChevronRight(), 12, "text-gv-fg3"),
+			icon(rtlSVG(cx, lucide.ChevronRight(), lucide.ChevronLeft()), 12, "text-gv-fg3"),
 		},
 	}
 }
 
 // dedupKeepOptionLabel formats a safe label for the keep-item selector.
 // It never exposes passwords or TOTP secrets.
-func dedupKeepOptionLabel(c *state.Cipher) string {
+func dedupKeepOptionLabel(m *AppModel, c *state.Cipher) string {
 	name := strings.TrimSpace(c.Name)
 	if name == "" {
-		name = "Untitled"
+		name = m.T("common.untitled")
 	}
-	user := "no user"
+	user := m.T("dedup.no_username_short")
 	if c.Login != nil && strings.TrimSpace(c.Login.Username) != "" {
 		user = c.Login.Username
 	}
 	var tags []string
 	if c.Login != nil && len(c.Login.Fido2Credentials) > 0 {
-		tags = append(tags, "Passkey")
+		tags = append(tags, m.T("dedup.keep_tag.passkey"))
 	}
 	if len(c.Attachments) > 0 {
-		tags = append(tags, "Files")
+		tags = append(tags, m.T("dedup.keep_tag.files"))
 	}
 	if c.Login != nil && strings.TrimSpace(c.Login.TOTP) != "" {
-		tags = append(tags, "2FA")
+		tags = append(tags, m.T("dedup.keep_tag.2fa"))
 	}
 	if len(c.Fields) > 0 {
-		tags = append(tags, fmt.Sprintf("%df", len(c.Fields)))
+		tags = append(tags, m.Tf("dedup.keep_tag.fields", len(c.Fields)))
 	}
 	if len(tags) > 0 {
 		return fmt.Sprintf("%s (%s) [%s]", name, user, strings.Join(tags, ", "))

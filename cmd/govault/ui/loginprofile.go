@@ -3,7 +3,6 @@ package ui
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"os"
@@ -66,12 +65,12 @@ func (m *AppModel) DropLoginProfile(uris []string) {
 		return
 	}
 	if len(uris) > 1 {
-		m.LoginError.Set("Drop a single .gvprofile file.")
+		m.LoginError.Set(m.T("profile.error.drop_single"))
 		return
 	}
 	f, err := core.FileFromURL(uris[0])
 	if err != nil {
-		m.LoginError.Set("Could not read dropped profile: " + err.Error())
+		m.LoginError.Set(m.Tf("profile.error.read_dropped", err.Error()))
 		return
 	}
 	m.loadLoginProfileFile(f)
@@ -84,16 +83,16 @@ func (m *AppModel) PickLoginProfile(cx *core.Scope) {
 	gen := m.LockGeneration()
 	op := m.profileImportOp
 	cx.PickFiles(core.PickFilesOptions{
-		Title:     "Import Encrypted Login Profile",
-		Button:    "Import",
+		Title:     m.T("profile.import.picker_title"),
+		Button:    m.T("profile.import.picker_btn"),
 		Types:     []string{".gvprofile", ".json"},
-		TypesName: "GoVault Login Profile",
+		TypesName: m.T("profile.import.picker_types_name"),
 	}, func(files []core.File, err error) {
 		if gen != m.LockGeneration() || op != m.profileImportOp || !m.showingSignInScreen() {
 			return
 		}
 		if err != nil {
-			m.LoginError.Set("Could not open profile: " + err.Error())
+			m.LoginError.Set(m.Tf("profile.error.open_failed", err.Error()))
 			return
 		}
 		if len(files) == 0 {
@@ -105,7 +104,7 @@ func (m *AppModel) PickLoginProfile(cx *core.Scope) {
 
 func (m *AppModel) loadLoginProfileFile(f core.File) {
 	if f.Size > loginprofile.MaxFileSize {
-		m.LoginError.Set(profileLoadError(loginprofile.ErrProfileTooLarge))
+		m.LoginError.Set(m.profileLoadError(loginprofile.ErrProfileTooLarge))
 		return
 	}
 	gen := m.LockGeneration()
@@ -121,12 +120,12 @@ func (m *AppModel) loadLoginProfileFile(f core.File) {
 			}
 			if err != nil {
 				crypto.ZeroBytes(data)
-				m.LoginError.Set(profileLoadError(err))
+				m.LoginError.Set(m.profileLoadError(err))
 				return
 			}
 			if err := loginprofile.ValidateContainer(data); err != nil {
 				crypto.ZeroBytes(data)
-				m.LoginError.Set(profileLoadError(err))
+				m.LoginError.Set(m.profileLoadError(err))
 				return
 			}
 			if m.profileImportPending != nil {
@@ -170,7 +169,7 @@ func (m *AppModel) ConfirmProfileImport() {
 	}
 	pw := m.ProfileImportPW.Get()
 	if pw == "" {
-		m.ProfileImportError.Set("Enter the profile passphrase.")
+		m.ProfileImportError.Set(m.T("profile.error.enter_passphrase"))
 		return
 	}
 	m.ReleaseSecureInput()
@@ -192,24 +191,24 @@ func (m *AppModel) ConfirmProfileImport() {
 			}
 			m.ProfileImportBusy.Set(false)
 			if errors.Is(err, loginprofile.ErrWrongPassphrase) {
-				m.ProfileImportError.Set("Incorrect profile passphrase.")
+				m.ProfileImportError.Set(m.T("profile.error.wrong_passphrase"))
 				return
 			}
 			if err != nil {
 				m.CloseProfileImportDialog()
-				m.LoginError.Set(profileLoadError(err))
+				m.LoginError.Set(m.profileLoadError(err))
 				return
 			}
 			if m.CanReturnToUnlock() {
 				acct := m.Core.Account()
 				if crypto.NormalizeEmail(prof.Email) != crypto.NormalizeEmail(acct.Email) {
 					m.CloseProfileImportDialog()
-					m.LoginError.Set("This login profile belongs to a different email than the locked vault.")
+					m.LoginError.Set(m.T("profile.error.different_email"))
 					return
 				}
 				if trusted := m.ReSignInServer.Get(); trusted != "" && !sameServerOrigin(trusted, prof.ServerURL) {
 					m.CloseProfileImportDialog()
-					m.LoginError.Set("This login profile belongs to a different server than the locked vault.")
+					m.LoginError.Set(m.T("profile.error.different_server"))
 					return
 				}
 			}
@@ -277,7 +276,7 @@ func (m *AppModel) ConfirmProfileExport(cx *core.Scope) {
 	pw2 := m.ProfileExportPW2.Get()
 
 	if server == "" || email == "" {
-		m.ProfileExportError.Set("Server URL and email are required.")
+		m.ProfileExportError.Set(m.T("profile.error.export_fields_required"))
 		return
 	}
 	prof := loginprofile.Profile{
@@ -287,22 +286,22 @@ func (m *AppModel) ConfirmProfileExport(cx *core.Scope) {
 	}
 	if mode == AuthModeAPIKey {
 		if clientID == "" || clientSecret == "" {
-			m.ProfileExportError.Set("Client ID and client secret are required for API Key profiles.")
+			m.ProfileExportError.Set(m.T("profile.error.export_apikey_required"))
 			return
 		}
 		prof.ClientID = clientID
 		prof.ClientSecret = clientSecret
 	}
 	if err := prof.Validate(); err != nil {
-		m.ProfileExportError.Set(profileLoadError(err))
+		m.ProfileExportError.Set(m.profileLoadError(err))
 		return
 	}
 	if utf8.RuneCountInString(pw) < loginprofile.MinPassphraseRunes {
-		m.ProfileExportError.Set(fmt.Sprintf("Use at least %d characters.", loginprofile.MinPassphraseRunes))
+		m.ProfileExportError.Set(m.Tf("profile.error.min_length", loginprofile.MinPassphraseRunes))
 		return
 	}
 	if pw != pw2 {
-		m.ProfileExportError.Set("The passphrases do not match.")
+		m.ProfileExportError.Set(m.T("profile.error.mismatch"))
 		return
 	}
 
@@ -330,11 +329,11 @@ func (m *AppModel) ConfirmProfileExport(cx *core.Scope) {
 			}
 			m.CloseProfileExportDialog()
 			name := "govault-login-profile-" + time.Now().Format("20060102") + ".gvprofile"
-			m.chooseSavePathWithTitle(cx, name, "Save Encrypted Login Profile", func(target saveTarget, err error) {
+			m.chooseSavePathWithTitle(cx, name, m.T("profile.export.save_title"), func(target saveTarget, err error) {
 				if err != nil || target.dir == "" || !m.StillUnlocked(gen) {
 					crypto.ZeroBytes(data)
 					if err != nil {
-						m.ShowToast(ui.ToastError, "Export failed", err.Error())
+						m.ShowToast(ui.ToastError, m.T("profile.export.toast_failed"), err.Error())
 					}
 					return
 				}
@@ -343,9 +342,9 @@ func (m *AppModel) ConfirmProfileExport(cx *core.Scope) {
 					m.Scope.Post(func() {
 						switch {
 						case err != nil:
-							m.ShowToast(ui.ToastError, "Export failed", err.Error())
+							m.ShowToast(ui.ToastError, m.T("profile.export.toast_failed"), err.Error())
 						case published:
-							m.ShowToast(ui.ToastSuccess, "Login profile exported", filepath.Base(path))
+							m.ShowToast(ui.ToastSuccess, m.T("profile.export.toast_saved"), filepath.Base(path))
 						}
 					})
 				}()
@@ -364,18 +363,18 @@ func profileImportDialog(m *AppModel) core.Node {
 			}
 		},
 		OnConfirm: m.ConfirmProfileImport,
-		Title:     "Import Encrypted Login Profile",
+		Title:     m.T("profile.import.title"),
 		DescriptionFunc: func() string {
 			if name := m.ProfileImportName.Get(); name != "" {
-				return "Enter the passphrase for " + name + "."
+				return m.Tf("profile.import.desc_named", name)
 			}
-			return "Enter the passphrase used to encrypt this login profile."
+			return m.T("profile.import.desc_default")
 		},
 		Children: []core.Node{
 			ui.Input{
 				TestID:        "profile-import-passphrase",
 				OnBlur:        settleSecureInput,
-				Placeholder:   "Profile passphrase",
+				Placeholder:   m.T("profile.import.passphrase_placeholder"),
 				Masked:        true,
 				AutoFocus:     true,
 				NoAutoCorrect: true,
@@ -394,14 +393,14 @@ func profileImportDialog(m *AppModel) core.Node {
 		Footer: []core.Node{
 			ui.Button{
 				TestID:   "profile-import-cancel",
-				Text:     "Cancel",
+				Text:     m.T("common.cancel"),
 				Variant:  ui.ButtonSecondary,
 				Disabled: m.ProfileImportBusy.Get,
 				OnPress:  m.CloseProfileImportDialog,
 			},
 			ui.Button{
 				TestID:  "profile-import-confirm",
-				Text:    "Unlock Profile",
+				Text:    m.T("profile.import.unlock_btn"),
 				Variant: ui.ButtonPrimary,
 				Busy:    m.ProfileImportBusy.Get,
 				OnPress: m.ConfirmProfileImport,
@@ -422,16 +421,16 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 			}
 		},
 		OnConfirm:   func() { m.ConfirmProfileExport(cx) },
-		Title:       "Export Encrypted Login Profile",
-		Description: "Protect your sign-in metadata with a passphrase (min 8 characters). Your master password is never included.",
+		Title:       m.T("profile.export.title"),
+		Description: m.T("profile.export.desc"),
 		Children: []core.Node{
 			ui.Tabs[LoginAuthMode]{
 				TestID: "profile-export-mode",
 				Equal:  true,
-				Label:  "Profile sign-in mode",
+				Label:  m.T("profile.export.mode_label"),
 				Options: []ui.Option[LoginAuthMode]{
-					{Value: AuthModePassword, Label: "Password", TestID: "profile-export-mode-password", Disabled: busy},
-					{Value: AuthModeAPIKey, Label: "API Key", TestID: "profile-export-mode-apikey", Disabled: busy},
+					{Value: AuthModePassword, Label: m.T("login.mode.password"), TestID: "profile-export-mode-password", Disabled: busy},
+					{Value: AuthModeAPIKey, Label: m.T("login.mode.apikey"), TestID: "profile-export-mode-apikey", Disabled: busy},
 				},
 				Value: m.ProfileExportMode.Get,
 				OnChange: func(mode LoginAuthMode) {
@@ -439,7 +438,7 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 					m.ProfileExportError.Set("")
 				},
 			},
-			formField("Server URL", authInput(base.Input{
+			formField(m.T("login.server_url"), authInput(base.Input{
 				TestID:        "profile-export-server",
 				Placeholder:   "https://vault.example.com",
 				NoAutoCorrect: true,
@@ -447,7 +446,7 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 				OnChange:      m.ProfileExportServer.Set,
 				Disabled:      busy,
 			})),
-			formField("Email", authInput(base.Input{
+			formField(m.T("login.email"), authInput(base.Input{
 				TestID:        "profile-export-email",
 				Placeholder:   "name@example.com",
 				NoAutoCorrect: true,
@@ -461,7 +460,7 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 					return core.View{
 						Class: "gap-3",
 						Children: []core.Node{
-							formField("Client ID", authInput(base.Input{
+							formField(m.T("login.apikey.client_id"), authInput(base.Input{
 								TestID:        "profile-export-client-id",
 								Placeholder:   "user.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
 								NoAutoCorrect: true,
@@ -469,10 +468,10 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 								OnChange:      m.ProfileExportClientID.Set,
 								Disabled:      busy,
 							})),
-							formField("Client Secret", authInput(base.Input{
+							formField(m.T("login.apikey.client_secret"), authInput(base.Input{
 								TestID:        "profile-export-client-secret",
 								OnBlur:        settleSecureInput,
-								Placeholder:   "API client secret",
+								Placeholder:   m.T("login.apikey.client_secret_placeholder"),
 								Masked:        true,
 								NoAutoCorrect: true,
 								Value:         m.ProfileExportClientSecret.Get,
@@ -483,10 +482,10 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 					}
 				},
 			},
-			formField("Profile Passphrase", authInput(base.Input{
+			formField(m.T("profile.export.passphrase"), authInput(base.Input{
 				TestID:        "profile-export-passphrase",
 				OnBlur:        settleSecureInput,
-				Placeholder:   "At least 8 characters",
+				Placeholder:   m.T("profile.export.passphrase_placeholder"),
 				Masked:        true,
 				AutoFocus:     true,
 				NoAutoCorrect: true,
@@ -494,10 +493,10 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 				OnChange:      m.ProfileExportPW.Set,
 				Disabled:      busy,
 			})),
-			formField("Confirm Passphrase", authInput(base.Input{
+			formField(m.T("profile.export.confirm_passphrase"), authInput(base.Input{
 				TestID:        "profile-export-passphrase-confirm",
 				OnBlur:        settleSecureInput,
-				Placeholder:   "Confirm passphrase",
+				Placeholder:   m.T("profile.export.confirm_placeholder"),
 				Masked:        true,
 				NoAutoCorrect: true,
 				Value:         m.ProfileExportPW2.Get,
@@ -515,14 +514,14 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 		Footer: []core.Node{
 			ui.Button{
 				TestID:   "profile-export-cancel",
-				Text:     "Cancel",
+				Text:     m.T("common.cancel"),
 				Variant:  ui.ButtonSecondary,
 				Disabled: busy,
 				OnPress:  m.CloseProfileExportDialog,
 			},
 			ui.Button{
 				TestID:  "profile-export-confirm",
-				Text:    "Export Profile",
+				Text:    m.T("profile.export.confirm_btn"),
 				Variant: ui.ButtonPrimary,
 				Busy:    busy,
 				OnPress: func() { m.ConfirmProfileExport(cx) },
@@ -531,16 +530,16 @@ func profileExportDialog(cx *core.Scope, m *AppModel) core.Node {
 	}
 }
 
-func profileLoadError(err error) string {
+func (m *AppModel) profileLoadError(err error) string {
 	switch {
 	case errors.Is(err, loginprofile.ErrProfileTooLarge):
-		return "Login profile file is too large (maximum 64 KiB)."
+		return m.T("profile.error.too_large")
 	case errors.Is(err, loginprofile.ErrWrongPassphrase):
-		return "Incorrect profile passphrase."
+		return m.T("profile.error.wrong_passphrase")
 	case errors.Is(err, loginprofile.ErrPassphraseTooShort):
-		return fmt.Sprintf("Use at least %d characters.", loginprofile.MinPassphraseRunes)
+		return m.Tf("profile.error.min_length", loginprofile.MinPassphraseRunes)
 	case errors.Is(err, loginprofile.ErrInvalidProfile):
-		return "Not a valid GoVault encrypted login profile."
+		return m.T("profile.error.invalid")
 	default:
 		return err.Error()
 	}

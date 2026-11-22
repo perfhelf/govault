@@ -539,14 +539,16 @@ type AppModel struct {
 	SSHAgentError *core.Signal[string]
 	vaultRev      *core.Signal[int]
 
-	URLCheckPhase    *core.Signal[URLCheckPhase]
-	URLCheckProgress *core.Signal[urlcheck.Progress]
-	URLCheckReport   *core.Signal[urlcheck.Report]
-	URLCheckBusyID   *core.Signal[string]
-	urlCheckMu       sync.Mutex
-	urlCheckCancel   context.CancelFunc
-	urlCheckOp       uint64
-	urlCheckOpts     func() urlcheck.Options
+	URLCheckPhase       *core.Signal[URLCheckPhase]
+	URLCheckProgress    *core.Signal[urlcheck.Progress]
+	URLCheckReport      *core.Signal[urlcheck.Report]
+	URLCheckBusyID      *core.Signal[string]
+	URLCheckSelectedIDs *core.Signal[map[string]bool]
+	URLCheckBatchBusy   *core.Signal[bool]
+	urlCheckMu          sync.Mutex
+	urlCheckCancel      context.CancelFunc
+	urlCheckOp          uint64
+	urlCheckOpts        func() urlcheck.Options
 
 	Toaster *ui.Toaster
 
@@ -758,6 +760,8 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		URLCheckProgress:          core.NewSignal(app, urlcheck.Progress{}),
 		URLCheckReport:            core.NewSignalFunc(app, urlcheck.Report{}, nil),
 		URLCheckBusyID:            core.NewSignal(app, ""),
+		URLCheckSelectedIDs:       core.NewSignalFunc[map[string]bool](app, nil, nil),
+		URLCheckBatchBusy:         core.NewSignal(app, false),
 		Toaster:                   ui.NewToaster(app),
 	}
 	m.IsSelected = core.NewSelector(app, m.SelectedID.Get)
@@ -836,8 +840,12 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 	})
 
 	app.Effect(func() {
-		if m.Route.Get() != RouteVault {
-			app.Untrack(m.clearBatchState)
+		r := m.Route.Get()
+		if r != RouteVault {
+			app.Untrack(m.clearVaultBatchState)
+		}
+		if r != RouteURLCheck {
+			app.Untrack(m.clearURLCheckSelection)
 		}
 	})
 
@@ -1154,7 +1162,7 @@ func (m *AppModel) Login() {
 	if m.LoginAuthMode.Get() == AuthModeAPIKey {
 		req, ok := m.loginAPIKeyRequest()
 		if !ok {
-			m.LoginError.Set("Server URL, email, client ID, client secret, and master password are required.")
+			m.LoginError.Set(m.T("login.error.apikey_fields_required"))
 			return
 		}
 		m.submitAPIKeyLogin(req)
@@ -1194,7 +1202,7 @@ func (m *AppModel) submitAPIKeyLogin(req state.LoginAPIKeyRequest) {
 
 func (m *AppModel) loginAPIKeyFailed(err error) {
 	if errors.Is(err, api.ErrUnauthorized) {
-		m.LoginError.Set("Invalid client ID or client secret.")
+		m.LoginError.Set(m.T("login.apikey.invalid_credentials"))
 		return
 	}
 	m.LoginError.Set(m.friendlyError(err))
@@ -1721,6 +1729,7 @@ func (m *AppModel) Logout(cx *core.Scope) {
 		m.clearAuthInputs()
 		m.clearBatchState()
 		m.cancelDedupMerge()
+		m.cancelURLCheck()
 		if m.Hooks.SSHAgent != nil {
 			m.Hooks.SSHAgent.Clear()
 		}

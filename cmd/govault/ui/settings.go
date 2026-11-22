@@ -69,11 +69,11 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							return m.formatDateTime(ts)
 						}),
 						settingsRow(
-							"Login profile",
-							"Export server, email, and optional API key as an encrypted .gvprofile file (never includes your master password).",
+							m.T("settings.account.login_profile"),
+							m.T("settings.account.login_profile_desc"),
 							ui.Button{
 								TestID:  "settings-export-login-profile",
-								Text:    "Export Encrypted Login Profile…",
+								Text:    m.T("settings.account.login_profile_btn"),
 								Icon:    lucide.FileKey,
 								Variant: ui.ButtonSecondary,
 								OnPress: m.StartExportLoginProfile,

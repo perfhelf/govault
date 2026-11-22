@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -448,4 +449,236 @@ func TestURLCheckInvalidURLBadgeAndArchivedJump(t *testing.T) {
 	if model.SidebarFilter.Get().Category != state.FilterArchive {
 		t.Fatalf("category = %v, want FilterArchive", model.SidebarFilter.Get().Category)
 	}
+}
+
+func TestURLCheckBatchMoveToFolderAndTrashAndGuards(t *testing.T) {
+	work := "f-work"
+	archiveOld := "f-old"
+	orgID := "org-1"
+
+	svc := newMockVaultService(state.StatusUnlocked)
+	svc.folders = []state.Folder{
+		{ID: work, Name: "Work"},
+		{ID: archiveOld, Name: "Old Sites"},
+	}
+	svc.organizations = []state.Organization{
+		{ID: orgID, Name: "Acme", Enabled: true},
+	}
+	svc.order = []string{"c-dead-1", "c-dead-2", "c-dead-3", "c-dead-ro"}
+	svc.ciphers = map[string]*state.Cipher{
+		"c-dead-1": {
+			ID:       "c-dead-1",
+			Type:     api.CipherTypeLogin,
+			Name:     "Dead One",
+			FolderID: &work,
+			Login: &state.Login{
+				Username: "alice",
+				Password: "pw1",
+				URIs:     []state.LoginURI{{URI: "https://dead1.example.test"}},
+			},
+		},
+		"c-dead-2": {
+			ID:   "c-dead-2",
+			Type: api.CipherTypeLogin,
+			Name: "Dead Two",
+			Login: &state.Login{
+				Username: "bob",
+				Password: "pw2",
+				URIs:     []state.LoginURI{{URI: "https://dead2.example.test"}},
+			},
+		},
+		"c-dead-3": {
+			ID:   "c-dead-3",
+			Type: api.CipherTypeLogin,
+			Name: "Dead Three",
+			Login: &state.Login{
+				Username: "carol",
+				Password: "pw3",
+				URIs:     []state.LoginURI{{URI: "https://dead3.example.test"}},
+			},
+		},
+		"c-dead-ro": {
+			ID:             "c-dead-ro",
+			Type:           api.CipherTypeLogin,
+			Name:           "ReadOnly Dead",
+			OrganizationID: &orgID,
+			ReadOnly:       true,
+			Login: &state.Login{
+				Username: "shared",
+				Password: "pw4",
+				URIs:     []state.LoginURI{{URI: "https://dead-ro.example.test"}},
+			},
+		},
+	}
+
+	app, model := startURLCheckApp(t, svc, func() urlcheck.Options {
+		return urlcheck.Options{
+			Concurrency: 2,
+			Timeout:     time.Second,
+			LookupHost: func(context.Context, string) ([]string, error) {
+				return []string{"93.184.216.34"}, nil
+			},
+			HTTPClient: &http.Client{
+				Transport: uiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					return uiResp(r, http.StatusNotFound), nil
+				}),
+			},
+		}
+	})
+
+	var alerts []core.AlertConfig
+	var alertAnswer int
+	app.OnAlert = func(cfg core.AlertConfig) int {
+		alerts = append(alerts, cfg)
+		return alertAnswer
+	}
+
+	app.Press("id:sidebar-urlcheck")
+	app.WaitFor("id:urlcheck-scan-btn", 2*time.Second)
+	app.Press("id:urlcheck-scan-btn")
+	app.WaitFor("id:urlcheck-batch-bar", 2*time.Second)
+	app.WaitFor("id:urlcheck-check-c-dead-ro", 2*time.Second)
+
+	// Read-only item checkbox is disabled; batch actions disabled at 0 selected; hint warns readonly omitted.
+	app.Find("id:urlcheck-batch-bar >> text:0 selected")
+	app.Find("id:urlcheck-batch-bar >> text:View-only omitted")
+	if app.Enabled("id:urlcheck-check-c-dead-ro") {
+		t.Fatal("read-only Dead URL checkbox unexpectedly enabled")
+	}
+	if app.Enabled("id:urlcheck-batch-move") || app.Enabled("id:urlcheck-batch-trash") {
+		t.Fatal("Dead URL batch actions enabled with 0 selected")
+	}
+
+	// Select All selects all 3 editable dead items and skips the read-only item.
+	app.Press("id:urlcheck-select-all")
+	app.WaitFor("id:urlcheck-batch-bar >> text:3 selected", 2*time.Second)
+	if !model.IsURLCheckSelected("c-dead-1") || !model.IsURLCheckSelected("c-dead-2") ||
+		!model.IsURLCheckSelected("c-dead-3") || model.IsURLCheckSelected("c-dead-ro") {
+		t.Fatalf("unexpected Select All set: %+v", model.URLCheckSelectedIDs.Get())
+	}
+	if !app.Enabled("id:urlcheck-batch-move") || !app.Enabled("id:urlcheck-batch-trash") {
+		t.Fatal("Dead URL batch actions disabled despite editable selection")
+	}
+
+	// Clear resets selection cleanly.
+	app.Press("id:urlcheck-clear-selection")
+	app.WaitFor("id:urlcheck-batch-bar >> text:0 selected", 2*time.Second)
+
+	// Offline and LocalOnly disable both single-row Trash and bulk Move/Trash.
+	app.Press("id:urlcheck-check-c-dead-1")
+	app.WaitFor("id:urlcheck-batch-bar >> text:1 selected", 2*time.Second)
+
+	app.Post(func() { model.SyncState.Set(SyncOffline) })
+	app.Settle()
+	if app.Enabled("id:urlcheck-batch-move") || app.Enabled("id:urlcheck-batch-trash") || app.Enabled("id:urlcheck-trash-c-dead-1") {
+		t.Fatal("Dead URL mutations enabled while Offline")
+	}
+	app.Find("id:urlcheck-batch-bar >> text:Offline · edits disabled")
+
+	app.Post(func() { model.SyncState.Set(SyncIdle) })
+	app.Settle()
+	if !app.Enabled("id:urlcheck-batch-move") || !app.Enabled("id:urlcheck-batch-trash") {
+		t.Fatal("Dead URL batch actions remained disabled after returning online")
+	}
+
+	svc.mu.Lock()
+	svc.localOnly = true
+	svc.mu.Unlock()
+	app.Post(model.RefreshVaultData)
+	app.Settle()
+	if app.Enabled("id:urlcheck-batch-move") || app.Enabled("id:urlcheck-batch-trash") || app.Enabled("id:urlcheck-trash-c-dead-1") {
+		t.Fatal("Dead URL mutations enabled while LocalOnly")
+	}
+	app.Find("id:urlcheck-batch-bar >> text:Sign in again to edit")
+
+	svc.mu.Lock()
+	svc.localOnly = false
+	svc.mu.Unlock()
+	app.Post(model.RefreshVaultData)
+	app.Settle()
+
+	// Bulk Move to Folder moves c-dead-1 and c-dead-2 into Old Sites while keeping all Dead rows visible.
+	app.Press("id:urlcheck-check-c-dead-2")
+	app.WaitFor("id:urlcheck-batch-bar >> text:2 selected", 2*time.Second)
+	app.Press("id:urlcheck-batch-move")
+	app.WaitFor("id:batch-folder-dialog", 2*time.Second)
+	app.Find("id:batch-folder-none")
+	app.Press("id:batch-folder-option-f-old")
+	app.WaitUntil(2*time.Second, func() bool {
+		c1, _ := svc.GetCipher("c-dead-1")
+		c2, _ := svc.GetCipher("c-dead-2")
+		return c1.FolderID != nil && *c1.FolderID == archiveOld &&
+			c2.FolderID != nil && *c2.FolderID == archiveOld &&
+			!model.URLCheckBatchBusy.Get() && model.URLCheckSelectedCount() == 0
+	})
+	if c3, _ := svc.GetCipher("c-dead-3"); c3.FolderID != nil {
+		t.Fatalf("unselected c-dead-3 folder changed to %v", *c3.FolderID)
+	}
+	if len(model.URLCheckReport.Get().Dead) != 4 {
+		t.Fatalf("Dead rows after folder move = %d, want 4", len(model.URLCheckReport.Get().Dead))
+	}
+
+	// Bulk Move to Trash: cancelling alert preserves items and selection; confirming trashes and prunes rows.
+	app.Press("id:urlcheck-check-c-dead-2")
+	app.Press("id:urlcheck-check-c-dead-3")
+	app.WaitFor("id:urlcheck-batch-bar >> text:2 selected", 2*time.Second)
+
+	alertAnswer = 0
+	app.Press("id:urlcheck-batch-trash")
+	app.Settle()
+	if len(alerts) != 1 || alerts[0].Title != "Move 2 items to Trash?" {
+		t.Fatalf("unexpected cancel alert: %+v", alerts)
+	}
+	if c2, _ := svc.GetCipher("c-dead-2"); c2.DeletedDate != nil {
+		t.Fatal("c-dead-2 moved to Trash despite cancelling alert")
+	}
+	app.Find("id:urlcheck-batch-bar >> text:2 selected")
+
+	alertAnswer = 1
+	app.Press("id:urlcheck-batch-trash")
+	app.WaitUntil(2*time.Second, func() bool {
+		c2, _ := svc.GetCipher("c-dead-2")
+		c3, _ := svc.GetCipher("c-dead-3")
+		return c2.DeletedDate != nil && c3.DeletedDate != nil &&
+			!model.URLCheckBatchBusy.Get() && model.URLCheckSelectedCount() == 0
+	})
+	if dead := model.URLCheckReport.Get().Dead; len(dead) != 2 {
+		t.Fatalf("remaining Dead items = %d, want 2 (%+v)", len(dead), dead)
+	}
+	if ro, _ := svc.GetCipher("c-dead-ro"); ro.DeletedDate != nil {
+		t.Fatal("read-only Dead URL item was deleted")
+	}
+
+	// Escape clears selection.
+	app.Press("id:urlcheck-check-c-dead-1")
+	app.WaitFor("id:urlcheck-batch-bar >> text:1 selected", 2*time.Second)
+	app.Key("escape")
+	app.WaitFor("id:urlcheck-batch-bar >> text:0 selected", 2*time.Second)
+
+	// Switching route clears selection.
+	app.Press("id:urlcheck-check-c-dead-1")
+	app.WaitFor("id:urlcheck-batch-bar >> text:1 selected", 2*time.Second)
+	app.Press("id:sidebar-all")
+	app.WaitUntil(2*time.Second, func() bool {
+		return model.Route.Get() == RouteVault && model.URLCheckSelectedCount() == 0
+	})
+
+	// Rescan clears selection, and Lock wipes scan + selection.
+	app.Press("id:sidebar-urlcheck")
+	app.WaitFor("id:urlcheck-check-c-dead-1", 2*time.Second)
+	app.Press("id:urlcheck-check-c-dead-1")
+	app.WaitFor("id:urlcheck-batch-bar >> text:1 selected", 2*time.Second)
+	app.Press("id:urlcheck-rescan-btn")
+	app.WaitFor("id:urlcheck-batch-bar", 2*time.Second)
+	app.Find("id:urlcheck-batch-bar >> text:0 selected")
+
+	app.Press("id:urlcheck-check-c-dead-1")
+	app.WaitFor("id:urlcheck-batch-bar >> text:1 selected", 2*time.Second)
+	app.Post(model.Lock)
+	app.WaitUntil(2*time.Second, func() bool {
+		return model.LockState.Get() == state.StatusLocked &&
+			model.URLCheckSelectedCount() == 0 &&
+			!model.URLCheckBatchBusy.Get() &&
+			model.URLCheckPhase.Get() == URLCheckIdle
+	})
 }

@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 
@@ -18,11 +17,21 @@ const (
 	BatchFolderNone BatchFolderMode = iota
 	BatchFolderMove
 	BatchFolderRestore
+	BatchFolderURLCheckMove
 )
 
 type BatchFolderModal struct {
 	Open bool
 	Mode BatchFolderMode
+}
+
+func (m *AppModel) clearVaultBatchState() {
+	m.BatchSelectMode.Set(false)
+	m.BatchSelectedIDs.Set(nil)
+	m.BatchBusy.Set(false)
+	if m.BatchFolderDialog.GetUntracked().Mode != BatchFolderURLCheckMove {
+		m.BatchFolderDialog.Set(BatchFolderModal{})
+	}
 }
 
 func (m *AppModel) clearBatchState() {
@@ -296,11 +305,11 @@ func (m *AppModel) CloseBatchFolderDialog() {
 	m.BatchFolderDialog.Set(BatchFolderModal{})
 }
 
-func batchItemNoun(n int) string {
+func (m *AppModel) batchCountText(oneKey, manyKey string, n int) string {
 	if n == 1 {
-		return "item"
+		return m.Tf(oneKey, n)
 	}
-	return "items"
+	return m.Tf(manyKey, n)
 }
 
 func (m *AppModel) ExecuteBatchMoveFolder(folderID *string) {
@@ -322,8 +331,8 @@ func (m *AppModel) ExecuteBatchMoveFolder(folderID *string) {
 	m.runBatchMutation(
 		ids,
 		false,
-		fmt.Sprintf("Moved %d %s", n, batchItemNoun(n)),
-		"Move to folder failed",
+		m.batchCountText("batch.moved_one", "batch.moved_many", n),
+		m.T("batch.move_folder_failed"),
 		func(ctx context.Context) error {
 			return m.Core.BulkMoveFolder(ctx, ids, target)
 		},
@@ -349,8 +358,8 @@ func (m *AppModel) ExecuteBatchRestore(targetFolderID *string) {
 	m.runBatchMutation(
 		ids,
 		true,
-		fmt.Sprintf("Restored %d %s", n, batchItemNoun(n)),
-		"Restore failed",
+		m.batchCountText("batch.restored_one", "batch.restored_many", n),
+		m.T("batch.restore_failed"),
 		func(ctx context.Context) error {
 			return m.Core.BulkRestore(ctx, ids, target)
 		},
@@ -366,13 +375,12 @@ func (m *AppModel) ConfirmBatchSoftDelete(cx *core.Scope) {
 	if n == 0 {
 		return
 	}
-	noun := batchItemNoun(n)
 	cx.ShowAlert(core.AlertConfig{
-		Title:   fmt.Sprintf("Move %d %s to Trash?", n, noun),
-		Message: fmt.Sprintf("%d selected %s will be moved to Trash. You can restore them later from Trash.", n, noun),
+		Title:   m.batchCountText("batch.trash_confirm_title_one", "batch.trash_confirm_title_many", n),
+		Message: m.batchCountText("batch.trash_confirm_msg_one", "batch.trash_confirm_msg_many", n),
 		Actions: []core.AlertAction{
-			{Label: "Cancel", Role: core.AlertCancel},
-			{Label: "Move to Trash", Role: core.AlertDestructive},
+			{Label: m.T("common.cancel"), Role: core.AlertCancel},
+			{Label: m.T("common.move_to_trash"), Role: core.AlertDestructive},
 		},
 		Cancelable: true,
 	}, func(idx int) {
@@ -382,8 +390,8 @@ func (m *AppModel) ConfirmBatchSoftDelete(cx *core.Scope) {
 		m.runBatchMutation(
 			ids,
 			true,
-			fmt.Sprintf("Moved %d %s to Trash", n, noun),
-			"Move to Trash failed",
+			m.batchCountText("batch.moved_trash_one", "batch.moved_trash_many", n),
+			m.T("toast.move_trash_failed"),
 			func(ctx context.Context) error {
 				return m.Core.BulkSoftDelete(ctx, ids)
 			},
@@ -400,13 +408,12 @@ func (m *AppModel) ConfirmBatchHardDelete(cx *core.Scope) {
 	if n == 0 {
 		return
 	}
-	noun := batchItemNoun(n)
 	cx.ShowAlert(core.AlertConfig{
-		Title:   fmt.Sprintf("Permanently delete %d %s?", n, noun),
-		Message: fmt.Sprintf("%d selected %s will be permanently deleted and cannot be recovered.", n, noun),
+		Title:   m.batchCountText("batch.delete_perm_confirm_title_one", "batch.delete_perm_confirm_title_many", n),
+		Message: m.batchCountText("batch.delete_perm_confirm_msg_one", "batch.delete_perm_confirm_msg_many", n),
 		Actions: []core.AlertAction{
-			{Label: "Cancel", Role: core.AlertCancel},
-			{Label: "Delete Permanently", Role: core.AlertDestructive},
+			{Label: m.T("common.cancel"), Role: core.AlertCancel},
+			{Label: m.T("common.delete_permanently"), Role: core.AlertDestructive},
 		},
 		Cancelable: true,
 	}, func(idx int) {
@@ -416,8 +423,8 @@ func (m *AppModel) ConfirmBatchHardDelete(cx *core.Scope) {
 		m.runBatchMutation(
 			ids,
 			true,
-			fmt.Sprintf("Deleted %d %s permanently", n, noun),
-			"Permanent delete failed",
+			m.batchCountText("batch.deleted_perm_one", "batch.deleted_perm_many", n),
+			m.T("batch.delete_perm_failed"),
 			func(ctx context.Context) error {
 				return m.Core.BulkHardDelete(ctx, ids)
 			},

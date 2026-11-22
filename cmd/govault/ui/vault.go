@@ -103,9 +103,9 @@ func (m *AppModel) filterTitle() string {
 	case RouteImport:
 		return m.T("nav.import")
 	case RouteDedup:
-		return "Duplicates"
+		return m.T("nav.dedup")
 	case RouteURLCheck:
-		return "Website Check"
+		return m.T("nav.urlcheck")
 	}
 	if m.SearchIsGlobal() {
 		return m.T("nav.all_items")
@@ -388,14 +388,14 @@ func sidebarView(cx *core.Scope, m *AppModel) core.Node {
 						press:  route(RouteHealth),
 					}),
 					sidebarRow(sidebarEntry{
-						testID: "sidebar-dedup", label: "Duplicates", glyph: lucide.CopyCheck, tint: 0x5856d6,
+						testID: "sidebar-dedup", label: m.T("nav.dedup"), glyph: lucide.CopyCheck, tint: 0x5856d6,
 						count:  func() int { return m.DedupReport.Get().RedundantItems() },
 						badge:  true,
 						active: func() bool { return m.Route.Get() == RouteDedup },
 						press:  route(RouteDedup),
 					}),
 					sidebarRow(sidebarEntry{
-						testID: "sidebar-urlcheck", label: "Website Check", glyph: lucide.GlobeCheck, tint: 0x5856d6,
+						testID: "sidebar-urlcheck", label: m.T("nav.urlcheck"), glyph: lucide.GlobeCheck, tint: 0x5856d6,
 						count:  func() int { return len(m.URLCheckReport.Get().Dead) },
 						badge:  true,
 						active: func() bool { return m.Route.Get() == RouteURLCheck },
@@ -979,7 +979,7 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 												}
 												return ui.Checkbox{
 													TestID:  "batch-checkbox-" + it.ID,
-													Label:   "Select " + it.Name,
+													Label:   m.Tf("a11y.select_named", it.Name),
 													Style:   core.Style{FlexShrink: 0},
 													Checked: batchChecked,
 													Disabled: func() bool {
@@ -1051,7 +1051,7 @@ func itemListPane(cx *core.Scope, m *AppModel) core.Node {
 													return core.Text{
 														TestID:  "batch-row-readonly",
 														Class:   "text-[10.5px] font-medium text-gv-fg3 px-1.5 py-0.5 rounded bg-gv-fill",
-														Content: "View only",
+														Content: m.T("pill.view_only"),
 													}
 												},
 											},
@@ -1087,7 +1087,7 @@ func listHeader(cx *core.Scope, m *AppModel) core.Node {
 								Children: []core.Node{
 									ui.Button{
 										TestID:  "batch-select-all",
-										Text:    "Select All",
+										Text:    m.T("common.select_all"),
 										Variant: ui.ButtonGhost,
 										Size:    ui.SizeSmall,
 										Disabled: func() bool {
@@ -1097,7 +1097,7 @@ func listHeader(cx *core.Scope, m *AppModel) core.Node {
 									},
 									ui.Button{
 										TestID:  "batch-clear",
-										Text:    "Clear",
+										Text:    m.T("common.clear"),
 										Variant: ui.ButtonGhost,
 										Size:    ui.SizeSmall,
 										Disabled: func() bool {
@@ -1109,7 +1109,7 @@ func listHeader(cx *core.Scope, m *AppModel) core.Node {
 							},
 							ui.Button{
 								TestID:   "batch-select-toggle",
-								Text:     "Cancel",
+								Text:     m.T("common.cancel"),
 								Variant:  ui.ButtonGhost,
 								Size:     ui.SizeSmall,
 								Disabled: m.BatchBusy.Get,
@@ -1127,12 +1127,15 @@ func listHeader(cx *core.Scope, m *AppModel) core.Node {
 								Class:  "text-[11.5px] font-medium text-gv-fg3 tabular-nums",
 								ContentFunc: func() string {
 									n := m.FilteredItems.Len()
-									return fmt.Sprintf("%d %s", n, batchItemNoun(n))
+									if n == 1 {
+										return m.T("batch.count_items_one")
+									}
+									return m.Tf("batch.count_items_many", n)
 								},
 							},
 							ui.Button{
 								TestID:  "batch-select-toggle",
-								Text:    "Select",
+								Text:    m.T("common.select"),
 								Variant: ui.ButtonGhost,
 								Size:    ui.SizeSmall,
 								Disabled: func() bool {
@@ -1166,7 +1169,7 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 								TestID: "batch-selected-count",
 								Class:  "text-[12px] font-semibold text-gv-fg tabular-nums",
 								ContentFunc: func() string {
-									return fmt.Sprintf("%d selected", m.BatchSelectedCount())
+									return m.Tf("batch.selected_count", m.BatchSelectedCount())
 								},
 							},
 							core.Show{
@@ -1185,11 +1188,11 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 										ContentFunc: func() string {
 											switch {
 											case m.LocalOnly.Get():
-												return "Sign in again to edit"
+												return m.T("batch.hint.local_only")
 											case m.SyncState.Get() == SyncOffline:
-												return "Offline · edits disabled"
+												return m.T("batch.hint.offline")
 											case m.BatchHasReadOnlyInView():
-												return "View-only omitted"
+												return m.T("batch.hint.readonly_omitted")
 											default:
 												return ""
 											}
@@ -1206,7 +1209,7 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 								Children: []core.Node{
 									ui.Button{
 										TestID:   "batch-restore-btn",
-										Text:     "Restore…",
+										Text:     m.T("batch.restore_btn"),
 										Variant:  ui.ButtonPrimary,
 										Size:     ui.SizeSmall,
 										Flex:     1,
@@ -1216,7 +1219,7 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 									},
 									ui.Button{
 										TestID:   "batch-hard-delete-btn",
-										Text:     "Delete Permanently",
+										Text:     m.T("common.delete_permanently"),
 										Variant:  ui.ButtonSecondary,
 										Size:     ui.SizeSmall,
 										Color:    func() core.Color { return themeColor(cx, "gv-danger") },
@@ -1232,7 +1235,7 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 							Children: []core.Node{
 								ui.Button{
 									TestID:   "batch-move-folder-btn",
-									Text:     "Move to Folder…",
+									Text:     m.T("batch.move_folder_btn"),
 									Variant:  ui.ButtonSecondary,
 									Size:     ui.SizeSmall,
 									Flex:     1,
@@ -1242,7 +1245,7 @@ func batchActionBar(cx *core.Scope, m *AppModel) core.Node {
 								},
 								ui.Button{
 									TestID:   "batch-trash-btn",
-									Text:     "Move to Trash",
+									Text:     m.T("common.move_to_trash"),
 									Variant:  ui.ButtonSecondary,
 									Size:     ui.SizeSmall,
 									Color:    func() core.Color { return themeColor(cx, "gv-danger") },

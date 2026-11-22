@@ -60,13 +60,13 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 						icon(lucide.FileKey(), 13, "text-gv-fg2"),
 						core.Text{
 							Class:   "text-[12px] text-gv-fg2",
-							Content: "Drop .gvprofile here to prefill credentials",
+							Content: m.T("profile.dropzone_hint"),
 						},
 					},
 				},
 				ui.Button{
 					TestID:   "login-import-profile",
-					Text:     "Import Encrypted Profile…",
+					Text:     m.T("profile.import.btn"),
 					Icon:     lucide.FileInput,
 					Variant:  ui.ButtonSecondary,
 					Size:     ui.SizeSmall,
@@ -78,10 +78,10 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 		ui.Tabs[LoginAuthMode]{
 			TestID: "login-auth-mode",
 			Equal:  true,
-			Label:  "Sign-in method",
+			Label:  m.T("login.auth_method"),
 			Options: []ui.Option[LoginAuthMode]{
-				{Value: AuthModePassword, Label: "Password", TestID: "login-mode-password", Disabled: m.LoginBusy.Get},
-				{Value: AuthModeAPIKey, Label: "API Key", TestID: "login-mode-apikey", Disabled: m.LoginBusy.Get},
+				{Value: AuthModePassword, Label: m.T("login.mode.password"), TestID: "login-mode-password", Disabled: m.LoginBusy.Get},
+				{Value: AuthModeAPIKey, Label: m.T("login.mode.apikey"), TestID: "login-mode-apikey", Disabled: m.LoginBusy.Get},
 			},
 			Value: m.LoginAuthMode.Get,
 			OnChange: func(mode LoginAuthMode) {
@@ -115,7 +115,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 							TestID: "login-apikey-fields",
 							Class:  "gap-3.5",
 							Children: []core.Node{
-								formField("Client ID", authInput(base.Input{
+								formField(m.T("login.apikey.client_id"), authInput(base.Input{
 									TestID:        "login-client-id",
 									Placeholder:   "user.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
 									NoAutoCorrect: true,
@@ -123,9 +123,9 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 									OnChange:      m.LoginClientID.Set,
 									Disabled:      m.LoginBusy.Get,
 								})),
-								formField("Client Secret", passwordField(cx, m, base.Input{
+								formField(m.T("login.apikey.client_secret"), passwordField(cx, m, base.Input{
 									TestID:        "login-client-secret",
-									Placeholder:   "API client secret",
+									Placeholder:   m.T("login.apikey.client_secret_placeholder"),
 									NoAutoCorrect: true,
 									Value:         m.LoginClientSecret.Get,
 									OnChange:      m.LoginClientSecret.Set,
@@ -151,7 +151,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 						return core.Text{
 							TestID:  "login-apikey-local-note",
 							Class:   "text-[11.5px] text-gv-fg3",
-							Content: "Your Client ID and Secret authenticate with the server; your master password only decrypts your vault locally.",
+							Content: m.T("login.apikey.local_note"),
 						}
 					},
 				},
@@ -165,7 +165,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 					Class:  "text-[12px] text-gv-warn",
 					ContentFunc: func() string {
 						if apiKeyMode() {
-							return "This server does not use HTTPS. Your API secret and vault data are sent unencrypted; use it only on a network you trust."
+							return m.T("login.apikey.insecure_warning")
 						}
 						return m.T("login.insecure_warning")
 					},
