@@ -286,6 +286,54 @@ func (c *Client) HardDeleteCipher(ctx context.Context, accessToken, cipherID str
 	return err
 }
 
+func (c *Client) bulkCiphers(ctx context.Context, method, path, accessToken string, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = c.do(ctx, method, path, "application/json", accessToken, nil, body)
+	return err
+}
+
+func nonNilIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
+// BulkSoftDeleteCiphers moves ciphers to Trash on the server.
+func (c *Client) BulkSoftDeleteCiphers(ctx context.Context, accessToken string, ids []string) error {
+	return c.bulkCiphers(ctx, http.MethodPut, "/api/ciphers/delete", accessToken, struct {
+		IDs []string `json:"ids"`
+	}{IDs: nonNilIDs(ids)})
+}
+
+// BulkMoveCiphers moves ciphers to folderID (or removes them from any folder when folderID is nil).
+func (c *Client) BulkMoveCiphers(ctx context.Context, accessToken string, ids []string, folderID *string) error {
+	if folderID != nil && *folderID == "" {
+		folderID = nil
+	}
+	return c.bulkCiphers(ctx, http.MethodPut, "/api/ciphers/move", accessToken, struct {
+		IDs      []string `json:"ids"`
+		FolderID *string  `json:"folderId"`
+	}{IDs: nonNilIDs(ids), FolderID: folderID})
+}
+
+// BulkRestoreCiphers restores trashed ciphers on the server.
+func (c *Client) BulkRestoreCiphers(ctx context.Context, accessToken string, ids []string) error {
+	return c.bulkCiphers(ctx, http.MethodPut, "/api/ciphers/restore", accessToken, struct {
+		IDs []string `json:"ids"`
+	}{IDs: nonNilIDs(ids)})
+}
+
+// BulkHardDeleteCiphers permanently deletes ciphers on the server.
+func (c *Client) BulkHardDeleteCiphers(ctx context.Context, accessToken string, ids []string) error {
+	return c.bulkCiphers(ctx, http.MethodDelete, "/api/ciphers/delete", accessToken, struct {
+		IDs []string `json:"ids"`
+	}{IDs: nonNilIDs(ids)})
+}
+
 func (c *Client) CreateFolder(ctx context.Context, accessToken, encryptedName string) (*EncryptedFolder, error) {
 	body, err := json.Marshal(struct {
 		Name string `json:"name"`

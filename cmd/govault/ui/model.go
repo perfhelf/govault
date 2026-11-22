@@ -496,6 +496,11 @@ type AppModel struct {
 	AttachmentBusy *core.Signal[string]
 	TrashBusy      *core.Signal[bool]
 
+	BatchSelectMode   *core.Signal[bool]
+	BatchSelectedIDs  *core.Signal[map[string]bool]
+	BatchBusy         *core.Signal[bool]
+	BatchFolderDialog *core.Signal[BatchFolderModal]
+
 	BackupDialog        *core.Signal[BackupMode]
 	BackupPW            *core.Signal[string]
 	BackupPW2           *core.Signal[string]
@@ -682,6 +687,10 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		FolderBusy:                core.NewSignal(app, false),
 		AttachmentBusy:            core.NewSignal(app, ""),
 		TrashBusy:                 core.NewSignal(app, false),
+		BatchSelectMode:           core.NewSignal(app, false),
+		BatchSelectedIDs:          core.NewSignalFunc[map[string]bool](app, nil, nil),
+		BatchBusy:                 core.NewSignal(app, false),
+		BatchFolderDialog:         core.NewSignal(app, BatchFolderModal{}),
 		BackupDialog:              core.NewSignal(app, BackupNone),
 		BackupPW:                  core.NewSignal(app, ""),
 		BackupPW2:                 core.NewSignal(app, ""),
@@ -712,6 +721,12 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		if m.LockState.Get() != state.StatusUnlocked {
 			m.RevokePending()
 			m.TOTPRevealedID.Set("")
+		}
+	})
+
+	app.Effect(func() {
+		if m.Route.Get() != RouteVault {
+			app.Untrack(m.clearBatchState)
 		}
 	})
 
@@ -750,8 +765,9 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 
 func cipherSummaryEqual(a, b state.CipherSummary) bool {
 	if a.ID != b.ID || a.Type != b.Type || a.Favorite != b.Favorite || a.Deleted != b.Deleted ||
+		a.Archived != b.Archived || a.ReadOnly != b.ReadOnly ||
 		a.Name != b.Name || a.Subtitle != b.Subtitle || a.HasTOTP != b.HasTOTP || a.Reprompt != b.Reprompt ||
-		!slices.Equal(a.URIs, b.URIs) {
+		!slices.Equal(a.URIs, b.URIs) || !slices.Equal(a.CollectionIDs, b.CollectionIDs) {
 		return false
 	}
 	if a.FolderID == nil && b.FolderID == nil {
@@ -1503,6 +1519,7 @@ func (m *AppModel) clearUnlockedUI() {
 	m.RepromptError.Set("")
 	m.AttachmentBusy.Set("")
 	m.TrashBusy.Set(false)
+	m.clearBatchState()
 	m.clearBackupState()
 	m.clearProfileExportState()
 	if m.Route.Get() == RouteImport {
@@ -1587,6 +1604,7 @@ func (m *AppModel) Logout(cx *core.Scope) {
 		}
 		m.RevokePending()
 		m.clearAuthInputs()
+		m.clearBatchState()
 		if m.Hooks.SSHAgent != nil {
 			m.Hooks.SSHAgent.Clear()
 		}
@@ -1683,6 +1701,7 @@ func (m *AppModel) RefreshVaultData() {
 	m.recomputeCounts()
 	m.recomputeHealth()
 	m.RefreshFilteredList()
+	m.pruneBatchSelection()
 	m.vaultRev.Set(m.vaultRev.GetUntracked() + 1)
 
 	selID := m.SelectedID.Get()
@@ -1888,6 +1907,7 @@ func (m *AppModel) EffectiveSearchFilter() state.SearchFilter {
 func (m *AppModel) SetSearchAll(on bool) {
 	m.SearchAll.Set(on)
 	m.RefreshFilteredList()
+	m.pruneBatchSelection()
 }
 
 func (m *AppModel) SetSearchQuery(q string) {
@@ -1906,6 +1926,7 @@ func (m *AppModel) SetSearchQuery(q string) {
 
 func (m *AppModel) SetSidebarFilter(f state.SearchFilter) {
 	m.ResetIdleTimer()
+	m.clearBatchState()
 	m.Route.Set(RouteVault)
 	m.SidebarFilter.Set(f)
 	m.SearchAll.Set(false)
@@ -1995,6 +2016,7 @@ func (m *AppModel) StartCreateCipher(cx *core.Scope) {
 	}
 	m.ResetIdleTimer()
 	m.GuardDirty(cx, func() {
+		m.clearBatchState()
 		m.Route.Set(RouteVault)
 		f := m.SidebarFilter.Get()
 		ct := api.CipherTypeLogin
@@ -2024,6 +2046,7 @@ func (m *AppModel) StartEditCipher(cx *core.Scope) {
 		if cur := m.ActiveCipher.Get(); cur == nil || cur.ID != c.ID {
 			return
 		}
+		m.clearBatchState()
 		m.openDraft(draftFromCipher(c))
 		m.EditDirty.Set(false)
 		m.EditError.Set("")
@@ -2814,6 +2837,12 @@ func friendlyError(err error) string {
 		return "The server did not confirm the change. GoVault synced to show where the item is now."
 	case errors.Is(err, state.ErrCipherInTrash):
 		return "Items in Trash cannot be archived. Restore the item first."
+	case errors.Is(err, state.ErrSignInRequired):
+		return "Sign in again to make changes."
+	case errors.Is(err, state.ErrReadOnlyCipher):
+		return "Read-only items cannot be modified."
+	case errors.Is(err, state.ErrFolderNotFound):
+		return "The selected folder no longer exists."
 	default:
 		return err.Error()
 	}

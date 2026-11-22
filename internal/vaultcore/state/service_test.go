@@ -116,6 +116,7 @@ type vaultTestEnv struct {
 	// after the change is applied, before the answer.
 	archiveApplyThen404 bool
 	onArchive           func()
+	bulkHandler         func(w http.ResponseWriter, r *http.Request) bool
 	refreshes           int
 	refreshSpent        map[string]bool
 }
@@ -498,6 +499,9 @@ func newVaultTestEnv(t *testing.T) *vaultTestEnv {
 			w.WriteHeader(http.StatusOK)
 
 		default:
+			if env.bulkHandler != nil && env.bulkHandler(w, r) {
+				return
+			}
 			if !env.handleAttachments(w, r) {
 				w.WriteHeader(http.StatusNotFound)
 			}

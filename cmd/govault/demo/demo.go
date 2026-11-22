@@ -239,6 +239,7 @@ func (s *Service) Search(query string, filter state.SearchFilter) []state.Cipher
 
 			OrganizationID: c.OrganizationID,
 			CollectionIDs:  c.CollectionIDs,
+			ReadOnly:       c.ReadOnly,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -339,6 +340,101 @@ func (s *Service) HardDeleteCipher(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.ciphers, id)
+	return nil
+}
+
+func (s *Service) validateBulkLocked(ids []string) ([]string, error) {
+	if s.status != state.StatusUnlocked {
+		return nil, state.ErrLocked
+	}
+	seen := make(map[string]struct{}, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		c, ok := s.ciphers[id]
+		if !ok {
+			return nil, state.ErrCipherNotFound
+		}
+		if c.ReadOnly {
+			return nil, state.ErrReadOnlyCipher
+		}
+		unique = append(unique, id)
+	}
+	return unique, nil
+}
+
+func (s *Service) BulkSoftDelete(_ context.Context, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unique, err := s.validateBulkLocked(ids)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, id := range unique {
+		ts := now
+		s.ciphers[id].DeletedDate = &ts
+	}
+	return nil
+}
+
+func (s *Service) BulkMoveFolder(_ context.Context, ids []string, folderID *string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unique, err := s.validateBulkLocked(ids)
+	if err != nil {
+		return err
+	}
+	var target *string
+	if folderID != nil && *folderID != "" {
+		v := *folderID
+		target = &v
+	}
+	for _, id := range unique {
+		if target == nil {
+			s.ciphers[id].FolderID = nil
+		} else {
+			v := *target
+			s.ciphers[id].FolderID = &v
+		}
+	}
+	return nil
+}
+
+func (s *Service) BulkRestore(_ context.Context, ids []string, targetFolderID *string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unique, err := s.validateBulkLocked(ids)
+	if err != nil {
+		return err
+	}
+	for _, id := range unique {
+		s.ciphers[id].DeletedDate = nil
+		if targetFolderID != nil {
+			if *targetFolderID == "" {
+				s.ciphers[id].FolderID = nil
+			} else {
+				v := *targetFolderID
+				s.ciphers[id].FolderID = &v
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) BulkHardDelete(_ context.Context, ids []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unique, err := s.validateBulkLocked(ids)
+	if err != nil {
+		return err
+	}
+	for _, id := range unique {
+		delete(s.ciphers, id)
+	}
 	return nil
 }
 

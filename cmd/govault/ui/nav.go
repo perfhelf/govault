@@ -141,6 +141,7 @@ func (m *AppModel) navigate(cx *core.Scope, dir int) {
 		}
 		m.ResetIdleTimer()
 		cx.Batch(func() {
+			m.clearBatchState()
 			m.Route.Set(target.Route)
 			m.SidebarFilter.Set(cloneFilter(target.Filter))
 			m.HealthFilter.Set(target.HealthFilter)

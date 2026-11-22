@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
+	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"github.com/nsgo-dev/nsgo/ui"
 	"github.com/txchen/govault/internal/vaultcore/state"
 )
@@ -44,6 +46,7 @@ func MainWindowView(cx *core.Scope, m *AppModel) core.Node {
 			whenUnlocked(m, func(cx *core.Scope) core.Node { return backupDialog(cx, m) }),
 			whenUnlocked(m, func(cx *core.Scope) core.Node { return profileExportDialog(cx, m) }),
 			whenUnlocked(m, func(*core.Scope) core.Node { return folderDialog(m) }),
+			whenUnlocked(m, func(*core.Scope) core.Node { return batchFolderDialog(m) }),
 			core.Show{
 				When: m.showingSignInScreen,
 				Then: func(cx *core.Scope) core.Node { return profileImportDialog(m) },
@@ -83,8 +86,13 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 		}
 	})
 	cx.OnKeyWith("escape", core.KeyOptions{When: core.KeyAlways}, func() {
-		if m.LockState.Get() == state.StatusUnlocked && m.EditMode.Get() {
+		if m.LockState.Get() != state.StatusUnlocked {
+			return
+		}
+		if m.EditMode.Get() {
 			m.CancelEdit(cx)
+		} else if m.BatchSelectMode.Get() && !m.BatchFolderDialog.Get().Open && !m.BatchBusy.Get() {
+			m.clearBatchState()
 		}
 	})
 	cx.OnKeyWith("mod+c", core.KeyOptions{When: core.KeyNotEditing}, func() {
@@ -330,6 +338,88 @@ func folderDialog(m *AppModel) core.Node {
 				Variant: ui.ButtonPrimary,
 				Busy:    m.FolderBusy.Get,
 				OnPress: m.SaveFolderModal,
+			},
+		},
+	}
+}
+
+func batchFolderDialog(m *AppModel) core.Node {
+	return ui.Dialog{
+		TestID: "batch-folder-dialog",
+		Open:   func() bool { return m.BatchFolderDialog.Get().Open },
+		OnOpenChange: func(open bool, _ base.Reason) {
+			if !open {
+				m.CloseBatchFolderDialog()
+			}
+		},
+		TitleFunc: func() string {
+			if m.BatchFolderDialog.Get().Mode == BatchFolderRestore {
+				return "Restore Items"
+			}
+			return "Move to Folder"
+		},
+		DescriptionFunc: func() string {
+			n := m.BatchSelectedCount()
+			noun := batchItemNoun(n)
+			if m.BatchFolderDialog.Get().Mode == BatchFolderRestore {
+				return fmt.Sprintf("Restore %d selected %s to their original folders or choose a folder.", n, noun)
+			}
+			return fmt.Sprintf("Choose a folder for %d selected %s.", n, noun)
+		},
+		Children: []core.Node{
+			core.Dynamic(func(cx *core.Scope) core.Node {
+				dlg := m.BatchFolderDialog.Get()
+				folders := m.Folders.Get()
+				disabled := func() bool { return m.BatchBusy.Get() || m.BatchMutationsDisabled() }
+				optionBtn := func(testID, text string, icon func() *core.SVG, onPress func()) core.Node {
+					return ui.Button{
+						TestID:   testID,
+						Text:     text,
+						Icon:     icon,
+						Variant:  ui.ButtonSecondary,
+						Style:    core.Style{Width: core.Pct(100)},
+						Disabled: disabled,
+						OnPress:  onPress,
+					}
+				}
+
+				var rows []core.Node
+				if dlg.Mode == BatchFolderRestore {
+					rows = append(rows, optionBtn("batch-folder-original", "Restore (Original Folders)", lucide.RotateCcw, func() {
+						m.ExecuteBatchRestore(nil)
+					}))
+				}
+				rows = append(rows, optionBtn("batch-folder-none", "(No Folder)", lucide.Folder, func() {
+					if dlg.Mode == BatchFolderRestore {
+						empty := ""
+						m.ExecuteBatchRestore(&empty)
+						return
+					}
+					m.ExecuteBatchMoveFolder(nil)
+				}))
+				for _, f := range folders {
+					fid := f.ID
+					rows = append(rows, optionBtn("batch-folder-option-"+fid, f.Name, lucide.Folder, func() {
+						if dlg.Mode == BatchFolderRestore {
+							m.ExecuteBatchRestore(&fid)
+							return
+						}
+						m.ExecuteBatchMoveFolder(&fid)
+					}))
+				}
+				return core.Scroll{
+					Style:    core.Style{MaxHeight: core.Pt(260)},
+					Children: []core.Node{core.View{Class: "gap-1.5", Children: rows}},
+				}
+			}),
+		},
+		Footer: []core.Node{
+			ui.Button{
+				TestID:   "batch-folder-cancel",
+				Text:     "Cancel",
+				Variant:  ui.ButtonSecondary,
+				Disabled: m.BatchBusy.Get,
+				OnPress:  m.CloseBatchFolderDialog,
 			},
 		},
 	}

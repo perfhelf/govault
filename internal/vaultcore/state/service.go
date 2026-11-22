@@ -881,7 +881,7 @@ func (s *Service) Search(query string, filter SearchFilter) []CipherSummary {
 	if s.status != StatusUnlocked {
 		return nil
 	}
-	return searchCiphers(s.ciphers, query, filter)
+	return searchCiphers(s.ciphers, query, filter, s.effectiveReadOnlyLocked)
 }
 
 func (s *Service) GetCipher(id string) (*Cipher, error) {
@@ -1178,6 +1178,225 @@ func (o *op) removeCipher(id string) error {
 	return o.updateSnapshot(func(resp *api.SyncResponse) {
 		resp.Ciphers = slices.DeleteFunc(resp.Ciphers, func(c api.EncryptedCipher) bool { return c.ID == id })
 	}, func() { delete(o.s.ciphers, id) })
+}
+
+func normalizeFolderPtr(folderID *string) *string {
+	if folderID == nil || *folderID == "" {
+		return nil
+	}
+	return cloneStringPtr(folderID)
+}
+
+func (s *Service) prepareBulkCiphers(ctx context.Context, ids []string, checkFolder *string) (*op, []string, map[string]struct{}, error) {
+	o, err := s.beginOp(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(ids) == 0 {
+		return o, nil, nil, nil
+	}
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if strings.TrimSpace(id) == "" {
+			o.end()
+			return nil, nil, nil, ErrCipherNotFound
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+
+	s.mu.RLock()
+	if !o.currentLocked() {
+		s.mu.RUnlock()
+		o.end()
+		return nil, nil, nil, ErrLocked
+	}
+	if checkFolder != nil && *checkFolder != "" {
+		if _, ok := s.folders[*checkFolder]; !ok {
+			s.mu.RUnlock()
+			o.end()
+			return nil, nil, nil, ErrFolderNotFound
+		}
+	}
+	for _, id := range unique {
+		c, ok := s.ciphers[id]
+		if !ok {
+			s.mu.RUnlock()
+			o.end()
+			return nil, nil, nil, ErrCipherNotFound
+		}
+		if s.effectiveReadOnlyLocked(c) {
+			s.mu.RUnlock()
+			o.end()
+			return nil, nil, nil, ErrReadOnlyCipher
+		}
+	}
+	s.mu.RUnlock()
+	return o, unique, seen, nil
+}
+
+func (o *op) commitBulk(edit func(resp *api.SyncResponse), apply func()) error {
+	err := o.updateSnapshot(edit, apply)
+	if !errors.Is(err, ErrLocked) {
+		o.s.notifyUpdated()
+	}
+	return err
+}
+
+func (s *Service) BulkSoftDelete(ctx context.Context, ids []string) error {
+	o, unique, idSet, err := s.prepareBulkCiphers(ctx, ids, nil)
+	if err != nil || len(unique) == 0 {
+		if o != nil {
+			o.end()
+		}
+		return err
+	}
+	defer o.end()
+
+	_, err = withAuth(o, func(ctx context.Context, tok string) (struct{}, error) {
+		return struct{}{}, o.client.BulkSoftDeleteCiphers(ctx, tok, unique)
+	})
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	return o.commitBulk(func(resp *api.SyncResponse) {
+		for i := range resp.Ciphers {
+			if _, ok := idSet[resp.Ciphers[i].ID]; ok {
+				ts := now
+				resp.Ciphers[i].DeletedDate = &ts
+			}
+		}
+	}, func() {
+		for id := range idSet {
+			if c, ok := s.ciphers[id]; ok {
+				ts := now
+				c.DeletedDate = &ts
+			}
+		}
+	})
+}
+
+func (s *Service) BulkMoveFolder(ctx context.Context, ids []string, folderID *string) error {
+	target := normalizeFolderPtr(folderID)
+	o, unique, idSet, err := s.prepareBulkCiphers(ctx, ids, target)
+	if err != nil || len(unique) == 0 {
+		if o != nil {
+			o.end()
+		}
+		return err
+	}
+	defer o.end()
+
+	_, err = withAuth(o, func(ctx context.Context, tok string) (struct{}, error) {
+		return struct{}{}, o.client.BulkMoveCiphers(ctx, tok, unique, target)
+	})
+	if err != nil {
+		return err
+	}
+
+	return o.commitBulk(func(resp *api.SyncResponse) {
+		for i := range resp.Ciphers {
+			if _, ok := idSet[resp.Ciphers[i].ID]; ok {
+				resp.Ciphers[i].FolderID = cloneStringPtr(target)
+			}
+		}
+	}, func() {
+		for id := range idSet {
+			if c, ok := s.ciphers[id]; ok {
+				c.FolderID = cloneStringPtr(target)
+			}
+		}
+	})
+}
+
+func (s *Service) BulkRestore(ctx context.Context, ids []string, targetFolderID *string) error {
+	moveFolder := targetFolderID != nil
+	target := normalizeFolderPtr(targetFolderID)
+	o, unique, idSet, err := s.prepareBulkCiphers(ctx, ids, target)
+	if err != nil || len(unique) == 0 {
+		if o != nil {
+			o.end()
+		}
+		return err
+	}
+	defer o.end()
+
+	_, err = withAuth(o, func(ctx context.Context, tok string) (struct{}, error) {
+		return struct{}{}, o.client.BulkRestoreCiphers(ctx, tok, unique)
+	})
+	if err != nil {
+		return err
+	}
+
+	var moveErr error
+	if moveFolder {
+		_, moveErr = withAuth(o, func(ctx context.Context, tok string) (struct{}, error) {
+			return struct{}{}, o.client.BulkMoveCiphers(ctx, tok, unique, target)
+		})
+	}
+
+	applyMove := moveFolder && moveErr == nil
+	snapErr := o.commitBulk(func(resp *api.SyncResponse) {
+		for i := range resp.Ciphers {
+			if _, ok := idSet[resp.Ciphers[i].ID]; ok {
+				resp.Ciphers[i].DeletedDate = nil
+				if applyMove {
+					resp.Ciphers[i].FolderID = cloneStringPtr(target)
+				}
+			}
+		}
+	}, func() {
+		for id := range idSet {
+			if c, ok := s.ciphers[id]; ok {
+				c.DeletedDate = nil
+				if applyMove {
+					c.FolderID = cloneStringPtr(target)
+				}
+			}
+		}
+	})
+	if moveErr != nil {
+		if snapErr == nil || errors.Is(snapErr, ErrLocked) {
+			return moveErr
+		}
+		return errors.Join(moveErr, snapErr)
+	}
+	return snapErr
+}
+
+func (s *Service) BulkHardDelete(ctx context.Context, ids []string) error {
+	o, unique, idSet, err := s.prepareBulkCiphers(ctx, ids, nil)
+	if err != nil || len(unique) == 0 {
+		if o != nil {
+			o.end()
+		}
+		return err
+	}
+	defer o.end()
+
+	_, err = withAuth(o, func(ctx context.Context, tok string) (struct{}, error) {
+		return struct{}{}, o.client.BulkHardDeleteCiphers(ctx, tok, unique)
+	})
+	if err != nil {
+		return err
+	}
+
+	return o.commitBulk(func(resp *api.SyncResponse) {
+		resp.Ciphers = slices.DeleteFunc(resp.Ciphers, func(c api.EncryptedCipher) bool {
+			_, ok := idSet[c.ID]
+			return ok
+		})
+	}, func() {
+		for id := range idSet {
+			delete(s.ciphers, id)
+		}
+	})
 }
 
 // TrashSelection lists the items in Trash the user may delete, with the
