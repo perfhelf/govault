@@ -21,6 +21,7 @@ func LoginView(cx *core.Scope, m *AppModel) core.Node {
 
 func signInView(cx *core.Scope, m *AppModel) core.Node {
 	apiKeyMode := func() bool { return m.LoginAuthMode.Get() == AuthModeAPIKey }
+	dragActive := core.NewSignal(cx, false)
 	return authScreen("login-screen", []core.Node{
 		core.View{
 			Class: "items-center gap-2.5 pb-1",
@@ -30,6 +31,47 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 				core.Text{
 					Class:   "text-[12.5px] text-gv-fg2 text-center",
 					Content: "Connect to your Bitwarden or Vaultwarden server.",
+				},
+			},
+		},
+		core.View{
+			TestID:   "login-profile-dropzone",
+			Disabled: m.LoginBusy.Get,
+			ClassFunc: func() string {
+				if dragActive.Get() {
+					return "rounded-lg border border-dashed border-gv-accent bg-gv-accent-soft px-3 py-2.5 gap-2 items-center"
+				}
+				return "rounded-lg border border-dashed border-gv-line bg-gv-panel px-3 py-2.5 gap-2 items-center"
+			},
+			OnFileDragEnter: func() {
+				if !m.LoginBusy.Get() {
+					dragActive.Set(true)
+				}
+			},
+			OnFileDragLeave: func() { dragActive.Set(false) },
+			OnFileDrop: func(uris []string) {
+				dragActive.Set(false)
+				m.DropLoginProfile(uris)
+			},
+			Children: []core.Node{
+				core.View{
+					Class: "flex-row items-center gap-1.5",
+					Children: []core.Node{
+						icon(lucide.FileKey(), 13, "text-gv-fg2"),
+						core.Text{
+							Class:   "text-[12px] text-gv-fg2",
+							Content: "Drop .gvprofile here to prefill credentials",
+						},
+					},
+				},
+				ui.Button{
+					TestID:   "login-import-profile",
+					Text:     "Import Encrypted Profile…",
+					Icon:     lucide.FileInput,
+					Variant:  ui.ButtonSecondary,
+					Size:     ui.SizeSmall,
+					Disabled: m.LoginBusy.Get,
+					OnPress:  func() { m.PickLoginProfile(cx) },
 				},
 			},
 		},
@@ -95,6 +137,7 @@ func signInView(cx *core.Scope, m *AppModel) core.Node {
 				},
 				formField("Master Password", passwordField(cx, base.Input{
 					TestID:        "login-password",
+					Ref:           &m.LoginPasswordRef,
 					Placeholder:   "Required",
 					NoAutoCorrect: true,
 					Value:         m.LoginPassword.Get,

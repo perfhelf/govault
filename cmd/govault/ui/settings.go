@@ -60,6 +60,17 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							}
 							return ts.Local().Format("Jan 2, 2006 at 3:04 PM")
 						}),
+						settingsRow(
+							"Login profile",
+							"Export server, email, and optional API key as an encrypted .gvprofile file (never includes your master password).",
+							ui.Button{
+								TestID:  "settings-export-login-profile",
+								Text:    "Export Encrypted Login Profile…",
+								Icon:    lucide.FileKey,
+								Variant: ui.ButtonSecondary,
+								OnPress: m.StartExportLoginProfile,
+							},
+						),
 						core.View{
 							Class: "flex-row items-center justify-between pl-4 pr-1.5 py-2",
 							Children: []core.Node{

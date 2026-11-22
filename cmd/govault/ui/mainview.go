@@ -42,7 +42,12 @@ func MainWindowView(cx *core.Scope, m *AppModel) core.Node {
 			}),
 			whenUnlocked(m, func(*core.Scope) core.Node { return repromptDialog(m) }),
 			whenUnlocked(m, func(cx *core.Scope) core.Node { return backupDialog(cx, m) }),
+			whenUnlocked(m, func(cx *core.Scope) core.Node { return profileExportDialog(cx, m) }),
 			whenUnlocked(m, func(*core.Scope) core.Node { return folderDialog(m) }),
+			core.Show{
+				When: m.showingSignInScreen,
+				Then: func(cx *core.Scope) core.Node { return profileImportDialog(m) },
+			},
 			ui.Toasts{
 				Toaster:   m.Toaster,
 				Placement: ui.ToastBottomEnd,

@@ -100,6 +100,10 @@ type saveTarget struct {
 // target when the user cancelled. Without a native path-only dialog it asks
 // for a folder only.
 func (m *AppModel) chooseSavePath(cx *core.Scope, name string, done func(saveTarget, error)) {
+	m.chooseSavePathWithTitle(cx, name, "Save Attachment", done)
+}
+
+func (m *AppModel) chooseSavePathWithTitle(cx *core.Scope, name, dirTitle string, done func(saveTarget, error)) {
 	name = filepath.Base(filepath.Clean("/" + name))
 	if name == "/" || name == "." {
 		name = "attachment"
@@ -116,7 +120,7 @@ func (m *AppModel) chooseSavePath(cx *core.Scope, name string, done func(saveTar
 		})
 		return
 	}
-	cx.PickDirectories(core.PickDirectoriesOptions{Title: "Save Attachment", Button: "Save Here"}, func(dirs []core.Directory, err error) {
+	cx.PickDirectories(core.PickDirectoriesOptions{Title: dirTitle, Button: "Save Here"}, func(dirs []core.Directory, err error) {
 		if err != nil || len(dirs) == 0 || dirs[0].Path == "" {
 			done(saveTarget{}, err)
 			return
