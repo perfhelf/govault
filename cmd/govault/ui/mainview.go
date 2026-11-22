@@ -93,6 +93,8 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 			m.CancelEdit(cx)
 		} else if m.BatchSelectMode.Get() && !m.BatchFolderDialog.Get().Open && !m.BatchBusy.Get() {
 			m.clearBatchState()
+		} else if m.Route.Get() == RouteURLCheck && m.URLCheckPhase.Get() == URLCheckScanning {
+			m.CancelURLCheck()
 		}
 	})
 	cx.OnKeyWith("mod+c", core.KeyOptions{When: core.KeyNotEditing}, func() {

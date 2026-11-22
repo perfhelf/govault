@@ -81,6 +81,8 @@ func UnlockedShellView(cx *core.Scope, m *AppModel) core.Node {
 							return ImportView(cx, m)
 						case RouteDedup:
 							return DedupView(cx, m)
+						case RouteURLCheck:
+							return URLCheckView(cx, m)
 						default:
 							return vaultSplitPanes(cx, m, shellW)
 						}
@@ -103,6 +105,8 @@ func (m *AppModel) filterTitle() string {
 		return "Import"
 	case RouteDedup:
 		return "Duplicates"
+	case RouteURLCheck:
+		return "Website Check"
 	}
 	if m.SearchIsGlobal() {
 		return "All Items"
@@ -390,6 +394,13 @@ func sidebarView(cx *core.Scope, m *AppModel) core.Node {
 						badge:  true,
 						active: func() bool { return m.Route.Get() == RouteDedup },
 						press:  route(RouteDedup),
+					}),
+					sidebarRow(sidebarEntry{
+						testID: "sidebar-urlcheck", label: "Website Check", glyph: lucide.GlobeCheck, tint: 0x5856d6,
+						count:  func() int { return len(m.URLCheckReport.Get().Dead) },
+						badge:  true,
+						active: func() bool { return m.Route.Get() == RouteURLCheck },
+						press:  route(RouteURLCheck),
 					}),
 					sidebarRow(sidebarEntry{
 						testID: "sidebar-archive", label: "Archive", glyph: lucide.Archive, tint: 0x8e8e93,
