@@ -78,8 +78,15 @@ func bindMainWindowShortcuts(cx *core.Scope, m *AppModel) {
 		}
 	})
 	cx.OnKeyWith("escape", core.KeyOptions{When: core.KeyAlways}, func() {
-		if m.LockState.Get() == state.StatusUnlocked && m.EditMode.Get() {
+		if m.LockState.Get() != state.StatusUnlocked {
+			return
+		}
+		if m.EditMode.Get() {
 			m.CancelEdit(cx)
+			return
+		}
+		if m.Route.Get() == RouteURLCheck && m.URLCheckPhase.Get() == URLCheckScanning {
+			m.CancelURLCheck()
 		}
 	})
 	cx.OnKeyWith("mod+c", core.KeyOptions{When: core.KeyNotEditing}, func() {

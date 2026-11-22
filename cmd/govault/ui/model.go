@@ -25,6 +25,7 @@ import (
 	"github.com/txchen/govault/internal/vaultcore/state"
 	"github.com/txchen/govault/internal/vaultcore/store"
 	"github.com/txchen/govault/internal/vaultcore/totp"
+	"github.com/txchen/govault/internal/vaultcore/urlcheck"
 )
 
 type SyncStatus int
@@ -50,6 +51,7 @@ const (
 	RouteSettings
 	RouteHealth
 	RouteImport
+	RouteURLCheck
 )
 
 type UserPrefs struct {
@@ -482,6 +484,15 @@ type AppModel struct {
 	SSHAgentError *core.Signal[string]
 	vaultRev      *core.Signal[int]
 
+	URLCheckPhase    *core.Signal[URLCheckPhase]
+	URLCheckProgress *core.Signal[urlcheck.Progress]
+	URLCheckReport   *core.Signal[urlcheck.Report]
+	URLCheckBusyID   *core.Signal[string]
+	urlCheckMu       sync.Mutex
+	urlCheckCancel   context.CancelFunc
+	urlCheckOp       uint64
+	urlCheckOpts     func() urlcheck.Options
+
 	Toaster *ui.Toaster
 
 	faviconsOn  *core.Memo[bool]
@@ -642,6 +653,10 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 		ImportBusy:          core.NewSignal(app, false),
 		SSHAgentError:       core.NewSignal(app, ""),
 		vaultRev:            core.NewSignal(app, 0),
+		URLCheckPhase:       core.NewSignal(app, URLCheckIdle),
+		URLCheckProgress:    core.NewSignal(app, urlcheck.Progress{}),
+		URLCheckReport:      core.NewSignalFunc(app, urlcheck.Report{}, nil),
+		URLCheckBusyID:      core.NewSignal(app, ""),
 		Toaster:             ui.NewToaster(app),
 	}
 	m.IsSelected = core.NewSelector(app, m.SelectedID.Get)
@@ -683,6 +698,7 @@ func NewAppModel(app *core.Scope, coreSvc state.VaultService, hooks PlatformHook
 	})
 
 	app.Cleanup(func() {
+		m.cancelURLCheck()
 		m.totpCtrl.Stop()
 		m.idleTimer.Stop()
 		if m.Hooks.SSHAgent != nil {
@@ -1382,6 +1398,7 @@ func (m *AppModel) clearUnlockedUI() {
 	m.RepromptError.Set("")
 	m.AttachmentBusy.Set("")
 	m.TrashBusy.Set(false)
+	m.clearURLCheck()
 	m.clearBackupState()
 	if m.Route.Get() == RouteImport {
 		m.Route.Set(RouteVault)
@@ -1554,6 +1571,7 @@ func (m *AppModel) RefreshVaultData() {
 	m.Collections.Set(m.Core.Collections())
 	m.recomputeCounts()
 	m.recomputeHealth()
+	m.pruneURLCheckResults()
 	m.RefreshFilteredList()
 	m.vaultRev.Set(m.vaultRev.GetUntracked() + 1)
 
