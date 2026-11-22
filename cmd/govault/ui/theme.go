@@ -295,7 +295,7 @@ func card(children ...core.Node) core.Node {
 			continue
 		}
 		if len(rows) > 0 && i > 0 {
-			rows = append(rows, core.View{Class: "h-px ml-4 bg-gv-line-soft"})
+			rows = append(rows, core.View{Class: "h-px ms-4 bg-gv-line-soft"})
 		}
 		rows = append(rows, c)
 	}

@@ -17,17 +17,17 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 			Class: "items-center gap-2.5 pb-1",
 			Children: []core.Node{
 				twoFactorEmblem(),
-				core.Text{Class: "mt-1.5 text-[19px] font-semibold text-gv-fg", Content: "Two-step verification"},
+				core.Text{Class: "mt-1.5 text-[19px] font-semibold text-gv-fg", Content: m.T("twofactor.title")},
 				core.Text{
 					Class: "text-[12.5px] text-gv-fg2 text-center",
 					ContentFunc: func() string {
 						if emailSelected() {
 							if prompt.EmailHint != "" {
-								return "Enter the code sent to " + prompt.EmailHint + "."
+								return m.Tf("twofactor.subtitle.email_hint", prompt.EmailHint)
 							}
-							return "Enter the code sent to your email."
+							return m.T("twofactor.subtitle.email")
 						}
-						return "Enter the 6-digit code from your authenticator app."
+						return m.T("twofactor.subtitle.authenticator")
 					},
 				},
 			},
@@ -40,7 +40,7 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 			Children: []core.Node{
 				ui.ToggleGroup{
 					TestID:   "twofactor-providers",
-					Label:    "Verification method",
+					Label:    m.T("twofactor.method_label"),
 					Disabled: busy,
 					Children: []core.Node{
 						providerToggle(m, "twofactor-provider-authenticator", api.TwoFactorAuthenticator, lucide.Smartphone),
@@ -55,7 +55,7 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 		core.View{
 			Class: "gap-3",
 			Children: []core.Node{
-				formField("Verification Code", authInput(base.Input{
+				formField(m.T("common.verification_code"), authInput(base.Input{
 					TestID:        "twofactor-code",
 					Class:         "font-mono",
 					Placeholder:   "123456",
@@ -74,7 +74,7 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 				},
 				ui.Checkbox{
 					TestID:   "twofactor-remember",
-					Text:     "Remember this device",
+					Text:     m.T("twofactor.remember_device"),
 					Checked:  m.TwoFactorRemember.Get,
 					OnChange: m.TwoFactorRemember.Set,
 					Disabled: busy,
@@ -90,7 +90,7 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 			Children: []core.Node{
 				ui.Button{
 					TestID:  "twofactor-verify",
-					Text:    "Verify",
+					Text:    m.T("common.verify"),
 					Variant: ui.ButtonPrimary,
 					Size:    ui.SizeLarge,
 					Busy:    busy,
@@ -99,7 +99,7 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 				},
 				ui.Button{
 					TestID:   "twofactor-back",
-					Text:     "Back to Sign In",
+					Text:     m.T("twofactor.back_to_sign_in"),
 					Variant:  ui.ButtonGhost,
 					Disabled: busy,
 					Style:    core.Style{Width: core.Pct(100)},
@@ -108,13 +108,13 @@ func TwoFactorView(cx *core.Scope, m *AppModel, prompt *TwoFactorPrompt) core.No
 			},
 		},
 	)
-	return authScreen("twofactor-screen", body, "Two-step login keeps your vault safe even if your password leaks.")
+	return authScreen("twofactor-screen", body, m.T("twofactor.footnote"))
 }
 
 func providerToggle(m *AppModel, testID string, p api.TwoFactorProvider, glyph func() *core.SVG) core.Node {
 	return ui.ToggleButton{
 		TestID:   testID,
-		Text:     p.String(),
+		Text:     m.twoFactorProviderLabel(p),
 		Icon:     glyph,
 		On:       func() bool { return m.TwoFactorProvider.Get() == p },
 		OnChange: func(bool) { m.SelectTwoFactorProvider(p) },
@@ -130,9 +130,9 @@ func emailCodeRow(m *AppModel) core.Node {
 				ContentFunc: func() string { return m.TwoFactorNotice.Get() },
 			},
 			core.Dynamic(func(cx *core.Scope) core.Node {
-				text := "Send Code"
+				text := m.T("twofactor.send_code")
 				if m.TwoFactorNotice.Get() != "" {
-					text = "Resend Code"
+					text = m.T("twofactor.resend_code")
 				}
 				return ui.Button{
 					TestID:   "twofactor-send-email",

@@ -24,10 +24,10 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					core.View{
 						Class: "flex-row gap-3",
 						Children: []core.Node{
-							tile(HealthReused, lucide.Repeat, 0xf08a0a, r.ReusedItems(), "Reused"),
-							tile(HealthWeak, lucide.ShieldAlert, 0xe5484d, len(r.Weak), "Weak"),
-							tile(HealthCards, lucide.CalendarClock, 0xa25ddc, len(r.Cards), "Expiring Cards"),
-							tile(HealthUnsecured, lucide.LockOpen, 0x0a84ff, len(r.Unsecured), "Unsecured HTTP"),
+							tile(HealthReused, lucide.Repeat, 0xf08a0a, r.ReusedItems(), m.T("health.tile.reused")),
+							tile(HealthWeak, lucide.ShieldAlert, 0xe5484d, len(r.Weak), m.T("health.tile.weak")),
+							tile(HealthCards, lucide.CalendarClock, 0xa25ddc, len(r.Cards), m.T("health.tile.cards")),
+							tile(HealthUnsecured, lucide.LockOpen, 0x0a84ff, len(r.Unsecured), m.T("health.tile.unsecured")),
 						},
 					},
 				}
@@ -35,7 +35,7 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					blocks = append(blocks, core.Text{
 						TestID:  "health-filter-empty",
 						Class:   "px-1 text-[12.5px] text-gv-fg2",
-						Content: "No issues in this category.",
+						Content: m.T("health.filter_empty"),
 					})
 				}
 				if r.TotalIssues() == 0 {
@@ -47,8 +47,8 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 							core.View{
 								Class: "flex-1 gap-[2px]",
 								Children: []core.Node{
-									core.Text{Class: "text-[14px] font-semibold text-gv-fg", Content: "All clear"},
-									core.Text{Class: "text-[12px] text-gv-fg2", Content: "No reused or weak passwords, expiring cards or unsecured websites."},
+									core.Text{Class: "text-[14px] font-semibold text-gv-fg", Content: m.T("health.all_clear_title")},
+									core.Text{Class: "text-[12px] text-gv-fg2", Content: m.T("health.all_clear_desc")},
 								},
 							},
 						},
@@ -60,26 +60,26 @@ func HealthView(cx *core.Scope, m *AppModel) core.Node {
 					}
 					title := ""
 					if i == 0 {
-						title = "Reused Passwords"
+						title = m.T("health.section.reused")
 					}
 					blocks = append(blocks, section(title, healthList(cx, m, g.Items)))
 				}
 				if len(r.Weak) > 0 && show(HealthWeak) {
-					blocks = append(blocks, section("Weak Passwords", healthList(cx, m, r.Weak)))
+					blocks = append(blocks, section(m.T("health.section.weak"), healthList(cx, m, r.Weak)))
 				}
 				if len(r.Cards) > 0 && show(HealthCards) {
 					items := make([]health.Issue, len(r.Cards))
 					for i, c := range r.Cards {
 						items[i] = c.Issue
 					}
-					blocks = append(blocks, section("Expiring Cards", healthList(cx, m, items)))
+					blocks = append(blocks, section(m.T("health.section.cards"), healthList(cx, m, items)))
 				}
 				if len(r.Unsecured) > 0 && show(HealthUnsecured) {
-					blocks = append(blocks, section("Unsecured Websites", healthList(cx, m, r.Unsecured)))
+					blocks = append(blocks, section(m.T("health.section.unsecured"), healthList(cx, m, r.Unsecured)))
 				}
 				blocks = append(blocks, core.Text{
 					Class:   "px-1 text-[11.5px] text-gv-fg3",
-					Content: "Checked on this device only. Nothing is sent to a server.",
+					Content: m.T("health.privacy_footer"),
 				})
 				return core.View{
 					Class:    "w-full max-w-[680px] self-center px-7 pt-6 pb-10 gap-5",
@@ -155,8 +155,8 @@ func healthList(cx *core.Scope, m *AppModel, items []health.Issue) core.Node {
 		rows = append(rows, core.View{
 			TestID:  "health-item",
 			Role:    core.RoleButton,
-			Label:   "Open " + issue.Name,
-			Class:   "flex-row items-center gap-3 pl-3.5 pr-3 py-2 min-h-[48px] active:bg-gv-fill",
+			Label:   m.Tf("a11y.open_item", issue.Name),
+			Class:   "flex-row items-center gap-3 ps-3.5 pe-3 py-2 min-h-[48px] active:bg-gv-fill",
 			OnPress: func(core.PressEvent) { m.OpenHealthItem(cx, issue.CipherID) },
 			Children: []core.Node{
 				itemEmblem(issue.Name, issue.Type, "", 28),
@@ -167,8 +167,8 @@ func healthList(cx *core.Scope, m *AppModel, items []health.Issue) core.Node {
 						core.Text{MaxLines: 1, Class: "text-[11.5px] text-gv-fg3", Content: issue.Subtitle},
 					},
 				},
-				core.Text{MaxLines: 1, Class: "text-[12px] text-gv-fg2 text-right", Content: issue.Detail},
-				icon(lucide.ChevronRight(), 12, "text-gv-fg3"),
+				core.Text{MaxLines: 1, Class: "text-[12px] text-gv-fg2 text-end", Content: m.healthDetailText(issue.Detail)},
+				icon(rtlSVG(cx, lucide.ChevronRight(), lucide.ChevronLeft()), 12, "text-gv-fg3"),
 			},
 		})
 	}

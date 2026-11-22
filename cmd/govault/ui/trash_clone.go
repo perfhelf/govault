@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/nsgo-dev/nsgo/core"
@@ -24,16 +23,16 @@ func (m *AppModel) EmptyTrash(cx *core.Scope) {
 	if n == 0 {
 		return
 	}
-	noun := "items"
+	msgKey := "trash.empty_message_many"
 	if n == 1 {
-		noun = "item"
+		msgKey = "trash.empty_message_one"
 	}
 	cx.ShowAlert(core.AlertConfig{
-		Title:   "Empty Trash?",
-		Message: fmt.Sprintf("%d %s will be permanently deleted and cannot be recovered.", n, noun),
+		Title:   m.T("trash.empty_title"),
+		Message: m.Tf(msgKey, n),
 		Actions: []core.AlertAction{
-			{Label: "Cancel", Role: core.AlertCancel},
-			{Label: "Empty Trash", Role: core.AlertDestructive},
+			{Label: m.T("common.cancel"), Role: core.AlertCancel},
+			{Label: m.T("trash.empty_action"), Role: core.AlertDestructive},
 		},
 		Cancelable: true,
 	}, func(idx int) {
@@ -54,19 +53,19 @@ func (m *AppModel) EmptyTrash(cx *core.Scope) {
 				m.RefreshVaultData()
 				var notes []string
 				if res.ReadOnly > 0 {
-					notes = append(notes, fmt.Sprintf("%d read-only item(s) stayed in Trash.", res.ReadOnly))
+					notes = append(notes, m.Tf("trash.readonly_kept", res.ReadOnly))
 				}
 				if res.Skipped > 0 {
-					notes = append(notes, fmt.Sprintf("%d item(s) changed on another device and were kept.", res.Skipped))
+					notes = append(notes, m.Tf("trash.changed_kept", res.Skipped))
 				}
 				desc := strings.Join(notes, " ")
 				switch {
 				case err != nil && res.Deleted == 0:
-					m.ShowToast(ui.ToastError, "Empty Trash failed", friendlyError(err))
+					m.ShowToast(ui.ToastError, m.T("trash.empty_failed"), m.friendlyError(err))
 				case err != nil:
-					m.ShowToast(ui.ToastWarning, fmt.Sprintf("Deleted %d item(s)", res.Deleted), "Some items could not be deleted: "+friendlyError(err))
+					m.ShowToast(ui.ToastWarning, m.Tf("trash.deleted_partial", res.Deleted), m.Tf("trash.delete_partial_desc", m.friendlyError(err)))
 				default:
-					m.ShowToast(ui.ToastInfo, "Trash emptied", desc)
+					m.ShowToast(ui.ToastInfo, m.T("trash.emptied"), desc)
 				}
 			})
 		}()
@@ -87,7 +86,7 @@ func (m *AppModel) CloneActive(cx *core.Scope) {
 		return
 	}
 	m.ResetIdleTimer()
-	m.GateReprompt(cx, c, "clone item", func() {
+	m.GateReprompt(cx, c, m.T("reprompt.action.clone_item"), func() {
 		if cur := m.ActiveCipher.Get(); cur == nil || cur.ID != c.ID {
 			return
 		}
@@ -107,7 +106,7 @@ func (m *AppModel) CloneActive(cx *core.Scope) {
 		src.EncryptedByKeyID = nil
 		src.ReadOnly = false
 		src.HidePassword = false
-		src.Name = c.Name + " (Copy)"
+		src.Name = m.Tf("clone.copy_name", c.Name)
 		// A passkey belongs to one item; Bitwarden does not copy it either.
 		hadPasskey := false
 		if c.Login != nil {
@@ -124,7 +123,7 @@ func (m *AppModel) CloneActive(cx *core.Scope) {
 		m.EditError.Set("")
 		m.EditMode.Set(true)
 		if hadPasskey {
-			m.ShowToast(ui.ToastInfo, "Passkeys are not copied", "The copy has the login details without the passkey.")
+			m.ShowToast(ui.ToastInfo, m.T("clone.passkey_notice_title"), m.T("clone.passkey_notice_desc"))
 		}
 	})
 }

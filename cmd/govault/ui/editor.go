@@ -36,7 +36,7 @@ func EditorPaneView(cx *core.Scope, m *AppModel) core.Node {
 							name = d.Name
 						}
 						if name == "" {
-							name = CipherTypeLabel(draftType.Get())
+							name = m.CipherTypeLabel(draftType.Get())
 						}
 						return itemEmblem(name, draftType.Get(), "", 32)
 					}),
@@ -51,32 +51,32 @@ func EditorPaneView(cx *core.Scope, m *AppModel) core.Node {
 										return ""
 									}
 									if d.IsNew {
-										return "New " + CipherTypeLabel(d.Type)
+										return m.Tf("editor.new_type", m.CipherTypeLabel(d.Type))
 									}
-									return "Edit " + CipherTypeLabel(d.Type)
+									return m.Tf("editor.edit_type", m.CipherTypeLabel(d.Type))
 								},
 							},
 							core.Text{
 								Class: "text-[11.5px] text-gv-fg3",
 								ContentFunc: func() string {
 									if m.EditDirty.Get() {
-										return "Unsaved changes"
+										return m.T("editor.unsaved_changes")
 									}
-									return "No changes"
+									return m.T("editor.no_changes")
 								},
 							},
 						},
 					},
 					ui.Button{
 						TestID:   "editor-cancel",
-						Text:     "Cancel",
+						Text:     m.T("common.cancel"),
 						Variant:  ui.ButtonSecondary,
 						Disabled: m.EditBusy.Get,
 						OnPress:  func() { m.CancelEdit(cx) },
 					},
 					ui.Button{
 						TestID:  "editor-save",
-						Text:    "Save",
+						Text:    m.T("common.save"),
 						Variant: ui.ButtonPrimary,
 						Busy:    m.EditBusy.Get,
 						OnPress: func() { m.SaveDraft(cx) },
@@ -93,28 +93,28 @@ func EditorPaneView(cx *core.Scope, m *AppModel) core.Node {
 								When: func() bool { return m.EditError.Get() != "" },
 								Then: func(cx *core.Scope) core.Node { return errorBanner("editor-error", m.EditError.Get) },
 							},
-							section("Item", core.Dynamic(func(cx *core.Scope) core.Node {
+							section(m.T("cipher.type.item"), core.Dynamic(func(cx *core.Scope) core.Node {
 								var rows []core.Node
 								if d := m.EditDraft.GetUntracked(); d != nil && d.IsNew {
-									rows = append(rows, formRow("Type", ui.Select[api.CipherType]{
+									rows = append(rows, formRow(m.T("editor.type"), ui.Select[api.CipherType]{
 										Disabled: m.EditBusy.Get,
 										TestID:   "editor-type",
 										Style:    core.Style{Width: core.Pt(180)},
 										Options: []ui.Option[api.CipherType]{
-											{Value: api.CipherTypeLogin, Label: "Login"},
-											{Value: api.CipherTypeSecureNote, Label: "Secure Note"},
-											{Value: api.CipherTypeCard, Label: "Card"},
-											{Value: api.CipherTypeIdentity, Label: "Identity"},
-											{Value: api.CipherTypeSSHKey, Label: "SSH Key"},
+											{Value: api.CipherTypeLogin, Label: m.CipherTypeLabel(api.CipherTypeLogin)},
+											{Value: api.CipherTypeSecureNote, Label: m.CipherTypeLabel(api.CipherTypeSecureNote)},
+											{Value: api.CipherTypeCard, Label: m.CipherTypeLabel(api.CipherTypeCard)},
+											{Value: api.CipherTypeIdentity, Label: m.CipherTypeLabel(api.CipherTypeIdentity)},
+											{Value: api.CipherTypeSSHKey, Label: m.CipherTypeLabel(api.CipherTypeSSHKey)},
 										},
 										Value:    draftType.Get,
 										OnChange: func(t api.CipherType) { m.MutateDraft(func(d *EditDraft) { d.Type = t }) },
 									}))
 								}
 								rows = append(rows,
-									formRow("Name", draftInput(m, "editor-name", "Required", func(d *EditDraft) string { return d.Name }, func(d *EditDraft, v string) { d.Name = v })),
-									formRow("Folder", core.Dynamic(func(cx *core.Scope) core.Node {
-										opts := []ui.Option[string]{{Value: "", Label: "No Folder"}}
+									formRow(m.T("field.name"), draftInput(m, "editor-name", m.T("common.required"), func(d *EditDraft) string { return d.Name }, func(d *EditDraft, v string) { d.Name = v })),
+									formRow(m.T("nav.folder_fallback"), core.Dynamic(func(cx *core.Scope) core.Node {
+										opts := []ui.Option[string]{{Value: "", Label: m.T("nav.no_folder")}}
 										for _, f := range m.Folders.Get() {
 											opts = append(opts, ui.Option[string]{Value: f.ID, Label: f.Name})
 										}
@@ -133,7 +133,7 @@ func EditorPaneView(cx *core.Scope, m *AppModel) core.Node {
 										}
 									})),
 									favoriteRow(m),
-									switchRow("Master password reprompt", "editor-reprompt", func(d *EditDraft) bool { return d.Reprompt }, func(d *EditDraft, v bool) { d.Reprompt = v }, m),
+									switchRow(m.T("editor.reprompt"), "editor-reprompt", func(d *EditDraft) bool { return d.Reprompt }, func(d *EditDraft, v bool) { d.Reprompt = v }, m),
 								)
 								return card(rows...)
 							})),
@@ -152,13 +152,13 @@ func EditorPaneView(cx *core.Scope, m *AppModel) core.Node {
 								}
 							}),
 							editorCustomFieldsSection(cx, m),
-							section("Notes", card(core.View{
+							section(m.T("section.notes"), card(core.View{
 								Class: "p-2",
 								Children: []core.Node{
 									ui.Input{
 										Disabled:    m.EditBusy.Get,
 										TestID:      "editor-notes",
-										Placeholder: "Add a note",
+										Placeholder: m.T("editor.notes_placeholder"),
 										Multiline:   true,
 										Style:       core.Style{MinHeight: core.Pt(96), BorderWidth: 0, Background: core.Transparent},
 										Value: func() string {
@@ -183,7 +183,7 @@ func formRow(label string, control core.Node) core.Node {
 	return core.View{
 		Class: "flex-row items-center gap-3 px-4 py-2 min-h-[44px]",
 		Children: []core.Node{
-			core.Text{Class: "w-[112px] text-[12.5px] text-gv-fg2", Content: label},
+			core.Text{Class: "w-[124px] text-[12.5px] text-gv-fg2", Content: label},
 			core.View{Class: "flex-1 flex-row items-center gap-2", Children: []core.Node{control}},
 		},
 	}
@@ -195,14 +195,14 @@ func favoriteRow(m *AppModel) core.Node {
 	return core.View{
 		Class: "flex-row items-center gap-3 px-4 py-2 min-h-[44px]",
 		Children: []core.Node{
-			core.Text{Class: "flex-1 text-[13px] text-gv-fg", Content: "Favorite"},
+			core.Text{Class: "flex-1 text-[13px] text-gv-fg", Content: m.T("editor.favorite")},
 			ui.Switch{
 				Disabled: func() bool {
 					d := m.EditDraft.Get()
 					return m.EditBusy.Get() || d == nil || !m.CanFavorite(d.Source)
 				},
 				TestID: "editor-favorite",
-				Label:  "Favorite",
+				Label:  m.T("editor.favorite"),
 				Checked: func() bool {
 					d := m.EditDraft.Get()
 					return d != nil && d.Favorite
@@ -250,12 +250,12 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 	return core.View{
 		Class: "gap-5",
 		Children: []core.Node{
-			section("Credentials", card(
-				formRow("Username", draftInput(m, "editor-username", "name@example.com", func(d *EditDraft) string { return d.Username }, func(d *EditDraft, v string) { d.Username = v })),
-				formRow("Password", flexed(passwordField(cx, base.Input{
+			section(m.T("section.credentials"), card(
+				formRow(m.T("field.username"), draftInput(m, "editor-username", "name@example.com", func(d *EditDraft) string { return d.Username }, func(d *EditDraft, v string) { d.Username = v })),
+				formRow(m.T("field.password"), flexed(passwordField(cx, m, base.Input{
 					Disabled:      m.EditBusy.Get,
 					TestID:        "editor-password",
-					Placeholder:   "Password",
+					Placeholder:   m.T("field.password"),
 					NoAutoCorrect: true,
 					Class:         "font-mono",
 					Value: func() string {
@@ -269,7 +269,7 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 					Disabled: m.EditBusy.Get,
 					TestID:   "editor-generate-pw",
 					Icon:     lucide.WandSparkles,
-					Label:    "Generate password",
+					Label:    m.T("editor.generate_password"),
 					Variant:  ui.ButtonGhost,
 					Side:     editorFieldHeight - 8,
 					IconSize: 13,
@@ -279,11 +279,11 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 						m.MutateDraft(func(d *EditDraft) { d.Password = pw })
 					},
 				}))),
-				formRow("Authenticator", flexed(sizedInput(base.Input{
+				formRow(m.T("editor.authenticator"), flexed(sizedInput(base.Input{
 					Disabled:      m.EditBusy.Get,
 					TestID:        "editor-totp",
 					Class:         "font-mono",
-					Placeholder:   "otpauth:// URI or setup key",
+					Placeholder:   m.T("editor.totp_placeholder"),
 					NoAutoCorrect: true,
 					Value: func() string {
 						if d := m.EditDraft.Get(); d != nil {
@@ -298,13 +298,13 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 				When: func() bool { return hasDraftPasskeys(m) },
 				Then: func(cx *core.Scope) core.Node { return editorPasskeyRows(cx, m) },
 			},
-			section("Websites", core.Dynamic(func(cx *core.Scope) core.Node {
+			section(m.T("section.websites"), core.Dynamic(func(cx *core.Scope) core.Node {
 				n := uriCount.Get()
 				rows := make([]core.Node, 0, n+1)
 				for i := range n {
 					idx := i
 					rows = append(rows, core.View{
-						Class: "flex-row items-center gap-2 pl-4 pr-2 py-2",
+						Class: "flex-row items-center gap-2 ps-4 pe-2 py-2",
 						Children: []core.Node{
 							icon(lucide.Globe(), 14, "text-gv-fg3"),
 							flexed(sizedInput(base.Input{
@@ -327,7 +327,7 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 									})
 								},
 							}, editorFieldHeight)),
-							removeButton(cx, m, "Remove website", func() {
+							removeButton(cx, m, m.T("editor.remove_website"), func() {
 								m.MutateDraft(func(d *EditDraft) {
 									if idx < len(d.URIs) {
 										d.URIs = append(d.URIs[:idx], d.URIs[idx+1:]...)
@@ -337,7 +337,7 @@ func editorLoginFields(cx *core.Scope, m *AppModel, showPW *core.Signal[bool]) c
 						},
 					})
 				}
-				rows = append(rows, addRow(m, "editor-add-uri", "Add Website", func() {
+				rows = append(rows, addRow(m, "editor-add-uri", m.T("editor.add_website"), func() {
 					m.MutateDraft(func(d *EditDraft) { d.URIs = append(d.URIs, EditURIDraft{}) })
 				}))
 				return card(rows...)
@@ -378,19 +378,19 @@ func addRow(m *AppModel, testID, label string, onPress func()) core.Node {
 }
 
 func editorCardFields(m *AppModel) core.Node {
-	return section("Card Details", card(
-		formRow("Cardholder", draftInput(m, "editor-cardholder", "Name on card", func(d *EditDraft) string { return d.Cardholder }, func(d *EditDraft, v string) { d.Cardholder = v })),
-		formRow("Brand", draftInput(m, "editor-brand", "Visa, Mastercard, Amex…", func(d *EditDraft) string { return d.Brand }, func(d *EditDraft, v string) { d.Brand = v })),
-		formRow("Number", draftInputMono(m, "editor-card-number", "1234 5678 9012 3456", func(d *EditDraft) string { return d.CardNumber }, func(d *EditDraft, v string) { d.CardNumber = v })),
-		formRow("Expiration", core.View{
+	return section(m.T("section.card_details"), card(
+		formRow(m.T("field.cardholder"), draftInput(m, "editor-cardholder", m.T("editor.cardholder_placeholder"), func(d *EditDraft) string { return d.Cardholder }, func(d *EditDraft, v string) { d.Cardholder = v })),
+		formRow(m.T("field.brand"), draftInput(m, "editor-brand", m.T("editor.brand_placeholder"), func(d *EditDraft) string { return d.Brand }, func(d *EditDraft, v string) { d.Brand = v })),
+		formRow(m.T("editor.card_number_label"), draftInputMono(m, "editor-card-number", "1234 5678 9012 3456", func(d *EditDraft) string { return d.CardNumber }, func(d *EditDraft, v string) { d.CardNumber = v })),
+		formRow(m.T("field.expiration"), core.View{
 			Class: "flex-1 flex-row items-center gap-2",
 			Children: []core.Node{
-				flexed(draftInput(m, "editor-exp-month", "MM", func(d *EditDraft) string { return d.ExpMonth }, func(d *EditDraft, v string) { d.ExpMonth = v })),
+				flexed(draftInput(m, "editor-exp-month", m.T("editor.exp_month_placeholder"), func(d *EditDraft) string { return d.ExpMonth }, func(d *EditDraft, v string) { d.ExpMonth = v })),
 				core.Text{Class: "text-[13px] text-gv-fg3", Content: "/"},
-				flexed(draftInput(m, "editor-exp-year", "YYYY", func(d *EditDraft) string { return d.ExpYear }, func(d *EditDraft, v string) { d.ExpYear = v })),
+				flexed(draftInput(m, "editor-exp-year", m.T("editor.exp_year_placeholder"), func(d *EditDraft) string { return d.ExpYear }, func(d *EditDraft, v string) { d.ExpYear = v })),
 			},
 		}),
-		formRow("Security Code", draftInputMono(m, "editor-card-code", "CVV", func(d *EditDraft) string { return d.CardCode }, func(d *EditDraft, v string) { d.CardCode = v })),
+		formRow(m.T("field.security_code"), draftInputMono(m, "editor-card-code", m.T("editor.security_code_placeholder"), func(d *EditDraft) string { return d.CardCode }, func(d *EditDraft, v string) { d.CardCode = v })),
 	))
 }
 
@@ -401,23 +401,23 @@ func editorIdentityFields(m *AppModel) core.Node {
 	return core.View{
 		Class: "gap-5",
 		Children: []core.Node{
-			section("Personal", card(
-				formRow("Name", pair(
-					draftInput(m, "editor-first-name", "First", func(d *EditDraft) string { return d.FirstName }, func(d *EditDraft, v string) { d.FirstName = v }),
-					draftInput(m, "editor-last-name", "Last", func(d *EditDraft) string { return d.LastName }, func(d *EditDraft, v string) { d.LastName = v }),
+			section(m.T("section.personal"), card(
+				formRow(m.T("field.name"), pair(
+					draftInput(m, "editor-first-name", m.T("editor.first_name_placeholder"), func(d *EditDraft) string { return d.FirstName }, func(d *EditDraft, v string) { d.FirstName = v }),
+					draftInput(m, "editor-last-name", m.T("editor.last_name_placeholder"), func(d *EditDraft) string { return d.LastName }, func(d *EditDraft, v string) { d.LastName = v }),
 				)),
-				formRow("Company", draftInput(m, "editor-company", "Company", func(d *EditDraft) string { return d.Company }, func(d *EditDraft, v string) { d.Company = v })),
-				formRow("Email", draftInput(m, "editor-ident-email", "name@example.com", func(d *EditDraft) string { return d.Email }, func(d *EditDraft, v string) { d.Email = v })),
-				formRow("Phone", draftInput(m, "editor-ident-phone", "+1 555 0100", func(d *EditDraft) string { return d.Phone }, func(d *EditDraft, v string) { d.Phone = v })),
+				formRow(m.T("field.company"), draftInput(m, "editor-company", m.T("field.company"), func(d *EditDraft) string { return d.Company }, func(d *EditDraft, v string) { d.Company = v })),
+				formRow(m.T("field.email"), draftInput(m, "editor-ident-email", "name@example.com", func(d *EditDraft) string { return d.Email }, func(d *EditDraft, v string) { d.Email = v })),
+				formRow(m.T("field.phone"), draftInput(m, "editor-ident-phone", "+1 555 0100", func(d *EditDraft) string { return d.Phone }, func(d *EditDraft, v string) { d.Phone = v })),
 			)),
-			section("Address", card(
-				formRow("Street", draftInput(m, "editor-ident-addr", "123 Main St", func(d *EditDraft) string { return d.Address1 }, func(d *EditDraft, v string) { d.Address1 = v })),
-				formRow("City", draftInput(m, "editor-ident-city", "City", func(d *EditDraft) string { return d.City }, func(d *EditDraft, v string) { d.City = v })),
-				formRow("State / ZIP", pair(
-					draftInput(m, "editor-ident-state", "State", func(d *EditDraft) string { return d.State }, func(d *EditDraft, v string) { d.State = v }),
-					draftInput(m, "editor-ident-postal", "Postal code", func(d *EditDraft) string { return d.PostalCode }, func(d *EditDraft, v string) { d.PostalCode = v }),
+			section(m.T("section.address"), card(
+				formRow(m.T("editor.street_label"), draftInput(m, "editor-ident-addr", m.T("editor.street_placeholder"), func(d *EditDraft) string { return d.Address1 }, func(d *EditDraft, v string) { d.Address1 = v })),
+				formRow(m.T("editor.city"), draftInput(m, "editor-ident-city", m.T("editor.city"), func(d *EditDraft) string { return d.City }, func(d *EditDraft, v string) { d.City = v })),
+				formRow(m.T("editor.state_zip"), pair(
+					draftInput(m, "editor-ident-state", m.T("editor.state_placeholder"), func(d *EditDraft) string { return d.State }, func(d *EditDraft, v string) { d.State = v }),
+					draftInput(m, "editor-ident-postal", m.T("editor.postal_placeholder"), func(d *EditDraft) string { return d.PostalCode }, func(d *EditDraft, v string) { d.PostalCode = v }),
 				)),
-				formRow("Country", draftInput(m, "editor-ident-country", "Country", func(d *EditDraft) string { return d.Country }, func(d *EditDraft, v string) { d.Country = v })),
+				formRow(m.T("editor.country"), draftInput(m, "editor-ident-country", m.T("editor.country"), func(d *EditDraft) string { return d.Country }, func(d *EditDraft, v string) { d.Country = v })),
 			)),
 		},
 	}
@@ -444,8 +444,8 @@ func editorSSHKeyFields(m *AppModel) core.Node {
 		}
 		return flexed(in)
 	}
-	return section("SSH Key", card(
-		formRow("Private Key", keyInput("editor-ssh-private", "-----BEGIN OPENSSH PRIVATE KEY-----", true,
+	return section(m.T("section.ssh_key"), card(
+		formRow(m.T("field.private_key"), keyInput("editor-ssh-private", "-----BEGIN OPENSSH PRIVATE KEY-----", true,
 			func(d *EditDraft) string { return d.SSHPrivate },
 			func(d *EditDraft, v string) {
 				d.SSHPrivate = v
@@ -453,9 +453,9 @@ func editorSSHKeyFields(m *AppModel) core.Node {
 					d.SSHPublic, d.SSHFinger = k.PublicKey, k.KeyFingerprint
 				}
 			})),
-		formRow("Public Key", keyInput("editor-ssh-public", "ssh-ed25519 AAAA…", false,
+		formRow(m.T("field.public_key"), keyInput("editor-ssh-public", "ssh-ed25519 AAAA…", false,
 			func(d *EditDraft) string { return d.SSHPublic }, func(d *EditDraft, v string) { d.SSHPublic = v })),
-		formRow("Fingerprint", keyInput("editor-ssh-fingerprint", "SHA256:…", false,
+		formRow(m.T("field.fingerprint"), keyInput("editor-ssh-fingerprint", "SHA256:…", false,
 			func(d *EditDraft) string { return d.SSHFinger }, func(d *EditDraft, v string) { d.SSHFinger = v })),
 		core.View{
 			Class: "flex-row items-center justify-end px-4 py-2",
@@ -463,7 +463,7 @@ func editorSSHKeyFields(m *AppModel) core.Node {
 				ui.Button{
 					Disabled: m.EditBusy.Get,
 					TestID:   "editor-ssh-generate",
-					Text:     "Generate Ed25519 Key",
+					Text:     m.T("editor.ssh_generate"),
 					Icon:     lucide.WandSparkles,
 					Variant:  ui.ButtonSecondary,
 					OnPress:  m.GenerateDraftSSHKey,
@@ -484,7 +484,7 @@ func (m *AppModel) GenerateDraftSSHKey() {
 	}
 	k, err := gen.GenerateEd25519SSHKey(sshKeyComment(d))
 	if err != nil {
-		m.EditError.Set("Could not generate SSH key: " + err.Error())
+		m.EditError.Set(m.Tf("editor.ssh_generate_failed", err.Error()))
 		return
 	}
 	m.MutateDraft(func(d *EditDraft) {
@@ -494,7 +494,7 @@ func (m *AppModel) GenerateDraftSSHKey() {
 
 func editorCustomFieldsSection(cx *core.Scope, m *AppModel) core.Node {
 	fieldCount := draftCount(cx, m, func(d *EditDraft) int { return len(d.Fields) })
-	return section("Custom Fields", core.Dynamic(func(cx *core.Scope) core.Node {
+	return section(m.T("section.custom_fields"), core.Dynamic(func(cx *core.Scope) core.Node {
 		n := fieldCount.Get()
 		rows := make([]core.Node, 0, n+1)
 		for i := range n {
@@ -521,14 +521,14 @@ func editorCustomFieldsSection(cx *core.Scope, m *AppModel) core.Node {
 				}, editorFieldHeight))
 			}
 			rows = append(rows, core.View{
-				Class: "flex-row items-center gap-2 pl-4 pr-2 py-2",
+				Class: "flex-row items-center gap-2 ps-4 pe-2 py-2",
 				Children: []core.Node{
 					ui.Select[int]{
 						Disabled: m.EditBusy.Get,
 						Style:    core.Style{Width: core.Pt(92)},
 						Options: []ui.Option[int]{
-							{Value: 0, Label: "Text"},
-							{Value: 1, Label: "Hidden"},
+							{Value: 0, Label: m.T("editor.field_type.text")},
+							{Value: 1, Label: m.T("editor.field_type.hidden")},
 						},
 						Value: func() int {
 							cur := m.EditDraft.Get()
@@ -545,9 +545,9 @@ func editorCustomFieldsSection(cx *core.Scope, m *AppModel) core.Node {
 							})
 						},
 					},
-					field(func(f EditFieldDraft) string { return f.Name }, func(f *EditFieldDraft, v string) { f.Name = v }, "Field name"),
-					field(func(f EditFieldDraft) string { return f.Value }, func(f *EditFieldDraft, v string) { f.Value = v }, "Value"),
-					removeButton(cx, m, "Remove field", func() {
+					field(func(f EditFieldDraft) string { return f.Name }, func(f *EditFieldDraft, v string) { f.Name = v }, m.T("editor.field_name_placeholder")),
+					field(func(f EditFieldDraft) string { return f.Value }, func(f *EditFieldDraft, v string) { f.Value = v }, m.T("editor.field_value_placeholder")),
+					removeButton(cx, m, m.T("editor.remove_field"), func() {
 						m.MutateDraft(func(d *EditDraft) {
 							if idx < len(d.Fields) {
 								d.Fields = append(d.Fields[:idx], d.Fields[idx+1:]...)
@@ -557,7 +557,7 @@ func editorCustomFieldsSection(cx *core.Scope, m *AppModel) core.Node {
 				},
 			})
 		}
-		rows = append(rows, addRow(m, "editor-add-field", "Add Field", func() {
+		rows = append(rows, addRow(m, "editor-add-field", m.T("editor.add_field"), func() {
 			m.MutateDraft(func(d *EditDraft) { d.Fields = append(d.Fields, EditFieldDraft{Type: 0}) })
 		}))
 		return card(rows...)

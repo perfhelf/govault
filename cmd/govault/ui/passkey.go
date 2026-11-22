@@ -13,14 +13,14 @@ import (
 
 // passkeyText describes a passkey without any of its secret material: its
 // relying party and when it was created.
-func passkeyText(f *state.Fido2Credential) string {
+func passkeyText(m *AppModel, f *state.Fido2Credential) string {
 	site := f.RpID
 	if site == "" {
 		site = f.RpName
 	}
 	created := ""
 	if t, err := time.Parse(time.RFC3339Nano, f.CreationDate); err == nil {
-		created = "Created " + t.Local().Format("Jan 2, 2006")
+		created = m.Tf("metadata.created", m.formatDate(t))
 	}
 	switch {
 	case site != "" && created != "":
@@ -30,7 +30,7 @@ func passkeyText(f *state.Fido2Credential) string {
 	case created != "":
 		return created
 	}
-	return "Stored in this item"
+	return m.T("passkey.stored_in_item")
 }
 
 func passkeyTestID(base string, i int) string {
@@ -41,15 +41,15 @@ func passkeyTestID(base string, i int) string {
 }
 
 // detailPasskeyRows shows every passkey of a login, read-only.
-func detailPasskeyRows(c *state.Cipher) []core.Node {
+func detailPasskeyRows(m *AppModel, c *state.Cipher) []core.Node {
 	if c.Login == nil {
 		return nil
 	}
 	var rows []core.Node
 	for i := range c.Login.Fido2Credentials {
-		rows = append(rows, fieldRow("Passkey", fieldOpts{
+		rows = append(rows, fieldRow(m.T("field.passkey"), fieldOpts{
 			testID: passkeyTestID("detail-passkey", i),
-			value:  staticValue(passkeyText(&c.Login.Fido2Credentials[i])),
+			value:  staticValue(passkeyText(m, &c.Login.Fido2Credentials[i])),
 		}))
 	}
 	return rows
@@ -63,11 +63,11 @@ func (m *AppModel) ConfirmRemovePasskey(cx *core.Scope, i int) {
 		return
 	}
 	cx.ShowAlert(core.AlertConfig{
-		Title:   "Remove passkey?",
-		Message: "You will no longer be able to sign in with this passkey.",
+		Title:   m.T("passkey.remove_title"),
+		Message: m.T("passkey.remove_message"),
 		Actions: []core.AlertAction{
-			{Label: "Cancel", Role: core.AlertCancel},
-			{Label: "Remove", Role: core.AlertDestructive},
+			{Label: m.T("common.cancel"), Role: core.AlertCancel},
+			{Label: m.T("common.remove"), Role: core.AlertDestructive},
 		},
 		Cancelable: true,
 	}, func(idx int) {
@@ -94,14 +94,14 @@ func editorPasskeyRows(cx *core.Scope, m *AppModel) core.Node {
 		var rows []core.Node
 		for i := range passkeys {
 			if d.PasskeyRemoved(i) {
-				rows = append(rows, formRow("Passkey", core.View{
+				rows = append(rows, formRow(m.T("field.passkey"), core.View{
 					Class: "flex-1 flex-row items-center gap-2",
 					Children: []core.Node{
-						core.Text{TestID: passkeyTestID("editor-passkey-removed", i), Class: "flex-1 text-[13px] text-gv-fg2", Content: "Removed when you save"},
+						core.Text{TestID: passkeyTestID("editor-passkey-removed", i), Class: "flex-1 text-[13px] text-gv-fg2", Content: m.T("passkey.removed_on_save")},
 						ui.Button{
 							Disabled: m.EditBusy.Get,
 							TestID:   passkeyTestID("editor-passkey-undo", i),
-							Text:     "Undo",
+							Text:     m.T("common.undo"),
 							Variant:  ui.ButtonGhost,
 							Size:     ui.SizeSmall,
 							OnPress: func() {
@@ -114,15 +114,15 @@ func editorPasskeyRows(cx *core.Scope, m *AppModel) core.Node {
 				}))
 				continue
 			}
-			rows = append(rows, formRow("Passkey", core.View{
+			rows = append(rows, formRow(m.T("field.passkey"), core.View{
 				Class: "flex-1 flex-row items-center gap-2",
 				Children: []core.Node{
-					core.Text{TestID: passkeyTestID("editor-passkey", i), MaxLines: 1, Class: "flex-1 text-[13px] text-gv-fg", Content: passkeyText(&passkeys[i])},
+					core.Text{TestID: passkeyTestID("editor-passkey", i), MaxLines: 1, Class: "flex-1 text-[13px] text-gv-fg", Content: passkeyText(m, &passkeys[i])},
 					ui.Button{
 						Disabled: m.EditBusy.Get,
 						TestID:   passkeyTestID("editor-passkey-remove", i),
 						Icon:     lucide.Trash,
-						Label:    "Remove passkey",
+						Label:    m.T("passkey.remove_label"),
 						Variant:  ui.ButtonGhost,
 						Side:     24,
 						IconSize: 13,

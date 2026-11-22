@@ -2,7 +2,6 @@ package ui
 
 import (
 	"runtime"
-	"strings"
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
@@ -18,6 +17,15 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 	bioOn := core.NewMemo(cx, func() bool { return m.Prefs.Get().BiometricEnabled })
 	showTray := core.NewMemo(cx, func() bool { return m.Prefs.Get().ShowTrayIcon })
 
+	trayTitleKey := "settings.tray.section_tray"
+	showTrayKey := "settings.tray.show_tray"
+	showTrayDescKey := "settings.tray.show_tray_desc"
+	if runtime.GOOS == "darwin" {
+		trayTitleKey = "settings.tray.section_menubar"
+		showTrayKey = "settings.tray.show_menubar"
+		showTrayDescKey = "settings.tray.show_menubar_desc"
+	}
+
 	return core.Scroll{
 		TestID: "settings-view",
 		Class:  "flex-1 bg-gv-canvas",
@@ -25,7 +33,7 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 			core.View{
 				Class: "w-full max-w-[620px] self-center px-7 pt-6 pb-10 gap-6",
 				Children: []core.Node{
-					section("Account", card(
+					section(m.T("settings.account.section"), card(
 						core.View{
 							Class: "flex-row items-center gap-3 px-4 py-3.5",
 							Children: []core.Node{
@@ -39,7 +47,7 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 								},
 								ui.Button{
 									TestID:  "settings-sync-now",
-									Text:    "Sync Now",
+									Text:    m.T("common.sync_now"),
 									Icon:    lucide.RefreshCw,
 									Variant: ui.ButtonSecondary,
 									Busy:    func() bool { return m.SyncState.Get() == SyncInProgress },
@@ -47,54 +55,61 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 								},
 							},
 						},
-						settingsMetaRow("Key derivation", func() string {
+						settingsMetaRow(m.T("settings.account.kdf"), func() string {
 							if s := m.Prefs.Get().KDFSummary; s != "" {
 								return s
 							}
 							return "—"
 						}),
-						settingsMetaRow("Last sync", func() string {
+						settingsMetaRow(m.T("settings.account.last_sync"), func() string {
 							ts := m.LastSync.Get()
 							if ts.IsZero() {
-								return "Not yet synced"
+								return m.T("settings.account.never_synced")
 							}
-							return ts.Local().Format("Jan 2, 2006 at 3:04 PM")
+							return m.formatDateTime(ts)
 						}),
 						core.View{
-							Class: "flex-row items-center justify-between pl-4 pr-1.5 py-2",
+							Class: "flex-row items-center justify-between ps-4 pe-1.5 py-2",
 							Children: []core.Node{
-								core.Text{Class: "text-[12px] text-gv-fg3", Content: "Logging out removes the local vault cache."},
+								core.Text{Class: "text-[12px] text-gv-fg3", Content: m.T("settings.account.logout_hint")},
 								core.View{
 									TestID:  "settings-logout",
 									Role:    core.RoleButton,
-									Label:   "Log Out",
+									Label:   m.T("common.log_out"),
 									Class:   "flex-row items-center gap-1.5 h-[26px] px-2.5 rounded-[6px] active:bg-gv-danger/10",
 									OnPress: func(core.PressEvent) { m.Logout(cx) },
 									Children: []core.Node{
 										icon(lucide.LogOut(), 13, "text-gv-danger"),
-										core.Text{Class: "text-[12.5px] font-medium text-gv-danger", Content: "Log Out"},
+										core.Text{Class: "text-[12.5px] font-medium text-gv-danger", Content: m.T("common.log_out")},
 									},
 								},
 							},
 						},
 					)),
-					section("Security", core.Dynamic(func(cx *core.Scope) core.Node {
+					section(m.T("settings.language.section"), card(
+						settingsRow(
+							m.T("settings.language.label"),
+							m.T("settings.language.desc"),
+							languageSelect(cx, m, "settings-language", 188),
+						),
+					)),
+					section(m.T("settings.security.section"), core.Dynamic(func(cx *core.Scope) core.Node {
 						var rows []core.Node
 						if showBio {
 							rows = append(rows, biometricRows(cx, m, canBio.Get(), bioOn.Get())...)
 						}
 						rows = append(rows, settingsRow(
-							"Auto-lock",
-							"Lock the vault after a period of inactivity.",
+							m.T("settings.autolock.label"),
+							m.T("settings.autolock.desc"),
 							ui.Select[int]{
 								TestID: "settings-autolock",
-								Style:  core.Style{Width: core.Pt(172)},
+								Style:  core.Style{Width: core.Pt(188)},
 								Options: []ui.Option[int]{
-									{Value: 1, Label: "After 1 minute"},
-									{Value: 5, Label: "After 5 minutes"},
-									{Value: 15, Label: "After 15 minutes"},
-									{Value: 60, Label: "After 1 hour"},
-									{Value: 0, Label: "Never"},
+									{Value: 1, Label: m.T("settings.autolock.1m")},
+									{Value: 5, Label: m.T("settings.autolock.5m")},
+									{Value: 15, Label: m.T("settings.autolock.15m")},
+									{Value: 60, Label: m.T("settings.autolock.1h")},
+									{Value: 0, Label: m.T("common.never")},
 								},
 								Value: func() int { return m.Prefs.Get().AutoLockMinutes },
 								OnChange: func(mins int) {
@@ -108,11 +123,11 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 						))
 						if m.Hooks.SleepLockSupported {
 							rows = append(rows, settingsRow(
-								"Lock on sleep or screen lock",
-								"Lock the vault when your Mac sleeps or the screen locks.",
+								m.T("settings.lock_on_sleep.label"),
+								m.T("settings.lock_on_sleep.desc"),
 								ui.Switch{
 									TestID:  "settings-lock-on-sleep",
-									Label:   "Lock on sleep or screen lock",
+									Label:   m.T("settings.lock_on_sleep.label"),
 									Checked: func() bool { return m.Prefs.Get().LockOnSleep },
 									OnChange: func(on bool) {
 										m.UpdatePrefs(func(p UserPrefs) UserPrefs {
@@ -129,24 +144,24 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 						When: func() bool { return m.Hooks.SSHAgent != nil },
 						Then: func(cx *core.Scope) core.Node { return sshAgentSection(m) },
 					},
-					section("Backup", card(
+					section(m.T("settings.backup.section"), card(
 						settingsRow(
-							"Export encrypted backup",
-							"A Bitwarden-compatible JSON file protected by a password you choose.",
+							m.T("settings.backup.export"),
+							m.T("settings.backup.export_desc"),
 							ui.Button{
 								TestID:  "settings-export",
-								Text:    "Export…",
+								Text:    m.T("settings.backup.export_btn"),
 								Icon:    lucide.FileOutput,
 								Variant: ui.ButtonSecondary,
 								OnPress: m.StartExport,
 							},
 						),
 						settingsRow(
-							"Import backup",
-							"Bitwarden JSON, encrypted or plain. Review every item before anything changes.",
+							m.T("settings.backup.import"),
+							m.T("settings.backup.import_desc"),
 							ui.Button{
 								TestID:   "settings-import",
-								Text:     "Import…",
+								Text:     m.T("settings.backup.import_btn"),
 								Icon:     lucide.FileInput,
 								Variant:  ui.ButtonSecondary,
 								Disabled: func() bool { return m.SyncState.Get() == SyncOffline },
@@ -154,40 +169,40 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							},
 						),
 					)),
-					section("Privacy", card(
+					section(m.T("settings.privacy.section"), card(
 						settingsRow(
-							"Show website icons",
-							"Fetch site icons from your Vaultwarden server.",
+							m.T("settings.privacy.show_favicons"),
+							m.T("settings.privacy.show_favicons_desc"),
 							ui.Switch{
 								TestID:   "settings-show-favicons",
-								Label:    "Show website icons",
+								Label:    m.T("settings.privacy.show_favicons"),
 								Checked:  func() bool { return m.Prefs.Get().FaviconsEnabled() },
 								OnChange: m.SetShowFavicons,
 							},
 						),
 						settingsRow(
-							"Icon cache",
-							"Remove downloaded site icons from this device.",
+							m.T("settings.privacy.icon_cache"),
+							m.T("settings.privacy.icon_cache_desc"),
 							ui.Button{
 								TestID:  "settings-clear-icon-cache",
-								Text:    "Clear Icon Cache",
+								Text:    m.T("settings.privacy.clear_icon_cache"),
 								Variant: ui.ButtonSecondary,
 								OnPress: m.ClearIconCache,
 							},
 						),
 					)),
-					section("Clipboard", card(
+					section(m.T("settings.clipboard.section"), card(
 						settingsRow(
-							"Clear copied secrets",
-							"Clears the clipboard if it still holds the copied value.",
+							m.T("settings.clipboard.clear"),
+							m.T("settings.clipboard.clear_desc"),
 							ui.Select[int]{
 								TestID: "settings-clipboard-clear",
-								Style:  core.Style{Width: core.Pt(172)},
+								Style:  core.Style{Width: core.Pt(188)},
 								Options: []ui.Option[int]{
-									{Value: 15, Label: "After 15 seconds"},
-									{Value: 30, Label: "After 30 seconds"},
-									{Value: 60, Label: "After 60 seconds"},
-									{Value: 0, Label: "Never"},
+									{Value: 15, Label: m.T("settings.clipboard.15s")},
+									{Value: 30, Label: m.T("settings.clipboard.30s")},
+									{Value: 60, Label: m.T("settings.clipboard.60s")},
+									{Value: 0, Label: m.T("common.never")},
 								},
 								Value: func() int { return m.Prefs.Get().ClipboardClearSeconds },
 								OnChange: func(secs int) {
@@ -199,14 +214,14 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							},
 						),
 						settingsRow(
-							"Concealed clipboard",
-							"Marks secrets so clipboard managers skip them.",
+							m.T("settings.clipboard.concealed"),
+							m.T("settings.clipboard.concealed_desc"),
 							ui.Badge{
 								TextFunc: func() string {
 									if m.Hooks.IsClipboardConcealed != nil && m.Hooks.IsClipboardConcealed() {
-										return "Active"
+										return m.T("settings.clipboard.active")
 									}
-									return "macOS only"
+									return m.T("settings.clipboard.macos_only")
 								},
 								VariantFunc: func() ui.BadgeVariant {
 									if m.Hooks.IsClipboardConcealed != nil && m.Hooks.IsClipboardConcealed() {
@@ -217,24 +232,24 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							},
 						),
 					)),
-					section(trayLabel(), core.Dynamic(func(cx *core.Scope) core.Node {
+					section(m.T(trayTitleKey), core.Dynamic(func(cx *core.Scope) core.Node {
 						trayOn := showTray.Get()
 						rows := []core.Node{settingsRow(
-							"Show "+strings.ToLower(trayLabel())+" icon",
-							"Open GoVault, sync or lock from the "+strings.ToLower(trayLabel())+".",
+							m.T(showTrayKey),
+							m.T(showTrayDescKey),
 							ui.Switch{
 								TestID:   "settings-show-tray",
-								Label:    "Show " + strings.ToLower(trayLabel()) + " icon",
+								Label:    m.T(showTrayKey),
 								Checked:  func() bool { return m.Prefs.Get().ShowTrayIcon },
 								OnChange: m.SetShowTrayIcon,
 							},
 						)}
 						rows = append(rows, settingsRow(
-							"Launch at login",
-							"Start GoVault automatically when you sign in.",
+							m.T("settings.tray.launch_at_login"),
+							m.T("settings.tray.launch_at_login_desc"),
 							ui.Switch{
 								TestID:  "settings-launch-at-login",
-								Label:   "Launch at login",
+								Label:   m.T("settings.tray.launch_at_login"),
 								Checked: func() bool { return m.Prefs.Get().LaunchAtLogin },
 								OnChange: func(on bool) {
 									m.UpdatePrefs(func(p UserPrefs) UserPrefs {
@@ -248,16 +263,16 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 							},
 						))
 						if runtime.GOOS == "darwin" {
-							desc := "Keep GoVault in the menu bar only."
+							desc := m.T("settings.tray.hide_dock_desc")
 							if !trayOn {
-								desc = "Turn on the menu bar icon first, so GoVault stays reachable."
+								desc = m.T("settings.tray.hide_dock_need_menubar")
 							}
 							rows = append(rows, settingsRow(
-								"Hide Dock icon",
+								m.T("settings.tray.hide_dock"),
 								desc,
 								ui.Switch{
 									TestID:   "settings-hide-dock",
-									Label:    "Hide Dock icon",
+									Label:    m.T("settings.tray.hide_dock"),
 									Disabled: func() bool { return !m.Prefs.Get().ShowTrayIcon },
 									Checked:  func() bool { return m.Prefs.Get().ShowTrayIcon && m.Prefs.Get().HideDockIcon },
 									OnChange: func(on bool) {
@@ -274,13 +289,13 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 						}
 						return card(rows...)
 					})),
-					section("About", card(
+					section(m.T("settings.about.section"), card(
 						settingsRow(
-							"GoVault "+appVersionLabel(),
-							"Updates are signed and installed automatically.",
+							m.Tf("settings.about.version_title", appVersionLabel(m)),
+							m.T("settings.about.updates_desc"),
 							ui.Button{
 								TestID:  "settings-check-updates",
-								Text:    "Check for Updates",
+								Text:    m.T("settings.about.check_updates"),
 								Icon:    lucide.RefreshCw,
 								Variant: ui.ButtonSecondary,
 								OnPress: func() { updater.Check(cx) },
@@ -294,13 +309,13 @@ func SettingsView(cx *core.Scope, m *AppModel) core.Node {
 }
 
 func sshAgentSection(m *AppModel) core.Node {
-	return section("SSH Agent", core.Dynamic(func(cx *core.Scope) core.Node {
+	return section(m.T("settings.ssh.section"), core.Dynamic(func(cx *core.Scope) core.Node {
 		rows := []core.Node{settingsRow(
-			"Enable SSH agent",
-			"Serve SSH keys from the unlocked vault. Keys with master password reprompt are not served.",
+			m.T("settings.ssh.enable"),
+			m.T("settings.ssh.enable_desc"),
 			ui.Switch{
 				TestID:   "settings-ssh-agent",
-				Label:    "Enable SSH agent",
+				Label:    m.T("settings.ssh.enable"),
 				Checked:  func() bool { return m.Prefs.Get().SSHAgentEnabled },
 				OnChange: m.SetSSHAgentEnabled,
 			},
@@ -309,12 +324,12 @@ func sshAgentSection(m *AppModel) core.Node {
 			return card(rows...)
 		}
 		rows = append(rows, core.View{
-			Class: "flex-row items-center gap-3 pl-4 pr-2.5 py-2.5",
+			Class: "flex-row items-center gap-3 ps-4 pe-2.5 py-2.5",
 			Children: []core.Node{
 				core.View{
 					Class: "flex-1 gap-[3px] overflow-hidden",
 					Children: []core.Node{
-						core.Text{Class: "text-[13px] text-gv-fg", Content: "Socket"},
+						core.Text{Class: "text-[13px] text-gv-fg", Content: m.T("settings.ssh.socket")},
 						core.Text{
 							TestID:     "settings-ssh-agent-socket",
 							Class:      "text-[12px] font-mono text-gv-fg2",
@@ -325,7 +340,7 @@ func sshAgentSection(m *AppModel) core.Node {
 				},
 				ui.Button{
 					TestID:  "settings-ssh-agent-copy",
-					Text:    "Copy SSH_AUTH_SOCK",
+					Text:    m.T("settings.ssh.copy_env"),
 					Icon:    lucide.Copy,
 					Variant: ui.ButtonSecondary,
 					OnPress: m.CopySSHAuthSock,
@@ -337,7 +352,7 @@ func sshAgentSection(m *AppModel) core.Node {
 				Class: "flex-row items-center gap-2 px-4 py-2.5",
 				Children: []core.Node{
 					icon(lucide.TriangleAlert(), 13, "text-gv-warn"),
-					core.Text{TestID: "settings-ssh-agent-error", Class: "flex-1 text-[12px] text-gv-fg2", Content: "Agent unavailable: " + msg},
+					core.Text{TestID: "settings-ssh-agent-error", Class: "flex-1 text-[12px] text-gv-fg2", Content: m.Tf("settings.ssh.unavailable", msg)},
 				},
 			})
 		}
@@ -345,31 +360,24 @@ func sshAgentSection(m *AppModel) core.Node {
 	}))
 }
 
-func appVersionLabel() string {
+func appVersionLabel(m *AppModel) string {
 	info := core.App()
 	if info.Version == "" {
-		return "(development)"
+		return m.T("settings.about.dev")
 	}
 	if info.Development {
-		return info.Version + " (development)"
+		return m.Tf("settings.about.version_dev", info.Version)
 	}
 	return info.Version
 }
 
-func trayLabel() string {
-	if runtime.GOOS == "darwin" {
-		return "Menu Bar"
-	}
-	return "Tray"
-}
-
 func biometricRows(cx *core.Scope, m *AppModel, available, enabled bool) []core.Node {
-	label := "Unlock with " + m.BiometricLabel()
+	label := m.Tf("settings.biometric.unlock_with", m.BiometricLabel())
 	if !available {
-		label = "Unlock with Touch ID"
+		label = m.T("settings.biometric.unlock_touch_id")
 		return []core.Node{settingsRow(
 			label,
-			"Touch ID unavailable on this Mac — pair a Touch ID keyboard or enroll in System Settings.",
+			m.T("settings.biometric.unavailable_desc"),
 			ui.Switch{
 				TestID:   "settings-biometric-toggle",
 				Label:    label,
@@ -380,7 +388,7 @@ func biometricRows(cx *core.Scope, m *AppModel, available, enabled bool) []core.
 	}
 	rows := []core.Node{settingsRow(
 		label,
-		"Keeps a wrapped key in the system keychain for fast unlock.",
+		m.T("settings.biometric.enabled_desc"),
 		ui.Switch{
 			TestID:   "settings-biometric-toggle",
 			Label:    label,
@@ -403,9 +411,9 @@ func biometricRows(cx *core.Scope, m *AppModel, available, enabled bool) []core.
 					Class:  "flex-1 text-[12px] text-gv-fg2",
 					ContentFunc: func() string {
 						if m.BiometricHardware.Get() {
-							return "Hardware-enforced: macOS releases the key only after Touch ID."
+							return m.T("settings.biometric.hardware_enforced")
 						}
-						return "App-gated: the key is in your login keychain and GoVault asks for " + m.BiometricLabel() + " before reading it."
+						return m.Tf("settings.biometric.app_gated", m.BiometricLabel())
 					},
 				},
 			},
@@ -413,11 +421,11 @@ func biometricRows(cx *core.Scope, m *AppModel, available, enabled bool) []core.
 	}
 	if enabled {
 		rows = append(rows, settingsRow(
-			"Prompt automatically",
-			"Ask for "+m.BiometricLabel()+" as soon as the locked window opens.",
+			m.T("settings.biometric.auto_prompt"),
+			m.Tf("settings.biometric.auto_prompt_desc", m.BiometricLabel()),
 			ui.Switch{
 				TestID:  "settings-biometric-autoprompt",
-				Label:   "Prompt automatically",
+				Label:   m.T("settings.biometric.auto_prompt"),
 				Checked: func() bool { return m.Prefs.Get().AutoPromptBiometric },
 				OnChange: func(on bool) {
 					m.UpdatePrefs(func(p UserPrefs) UserPrefs {
@@ -440,7 +448,7 @@ func settingsMetaRow(label string, value func() string) core.Node {
 		Class: "flex-row items-center justify-between gap-4 px-4 py-2.5",
 		Children: []core.Node{
 			core.Text{Class: "text-[13px] text-gv-fg", Content: label},
-			core.Text{MaxLines: 1, Class: "shrink text-[12.5px] text-gv-fg2 text-right", ContentFunc: value},
+			core.Text{MaxLines: 1, Class: "shrink text-[12.5px] text-gv-fg2 text-end", ContentFunc: value},
 		},
 	}
 }
